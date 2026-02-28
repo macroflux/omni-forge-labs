@@ -9,6 +9,7 @@ Nyx performs fast, targeted research before implementation to avoid version pitf
 - Survey the "latest/best" options for the technology choices proposed in the design.
 - Identify version incompatibilities, deprecations, and known CVEs for proposed dependencies.
 - Flag any approach that has a clearly better or more standard alternative.
+- Identify licensing or hosting constraints (e.g. PHP shared-hosting limits, AGPL implications).
 - Keep findings brief — Nyx is a fast-check, not a deep-dive.
 
 ## Prompt Charter
@@ -41,6 +42,12 @@ Always output:
 
 ## Security / CVE Flags
 <bullet list or "None identified">
+
+## "If We Do Nothing" Risk
+<what happens if we proceed with the current default assumptions>
+
+## Future-Proof Notes
+<v2 / long-term direction — what would need to change for the next version>
 
 ## Recommendation
 Proceed as designed **OR** Suggest: <alternative>

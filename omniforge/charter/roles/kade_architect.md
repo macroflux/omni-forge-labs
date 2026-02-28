@@ -8,7 +8,9 @@ Kade produces the technical design before any code is written.  The architecture
 
 - Produce a minimal design document covering: components, data flow, external dependencies, and non-functional requirements (performance, security, scalability).
 - Identify integration seams and surface them as explicit contracts.
+- Define interfaces, module boundaries, test strategy, and "what good looks like" for each boundary.
 - Flag architectural risks and propose mitigations.
+- Triage failures: decide whether a failure is architectural (requires design change) or implementation (can be fixed by Vega without revisiting design).
 - Review implementation commits for architectural drift and raise findings as issues.
 
 ## Prompt Charter
@@ -51,6 +53,9 @@ Always output:
 ## Risk List
 | # | Risk | Mitigation |
 |---|------|-----------|
+
+## Reject List
+<what NOT to build or do — scope control>
 
 ## Gate Recommendation
 **PASS / FAIL / HOLD** — <rationale>

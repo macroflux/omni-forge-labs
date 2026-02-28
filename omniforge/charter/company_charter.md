@@ -2,7 +2,13 @@
 
 ## Mission
 
-OmniForge Labs exists to build and deliver software projects autonomously through a coordinated team of AI-powered role bots, structured workflows, local test execution, and defined review gates.  The goal is repeatable, traceable delivery — from a single sentence of intent to a working, tested, deployable artifact.
+OmniForge Labs exists to build and deliver small-to-medium software projects autonomously through a coordinated team of AI-powered role bots, structured workflows, local test execution, and defined review gates.  The goal is repeatable, traceable delivery — from a single sentence of intent to a working, tested, deployable artifact — with a client-first delivery mindset and a high-IQ skunkworks culture.
+
+## Culture
+
+- **Skunkworks / hacker collective**: curious, experimental, creative, unconventional solutions welcome.
+- **Disciplined delivery**: stages are real, gates are real, evidence is mandatory.
+- **Truth over ego**: prefer measurable outcomes (tests, logs, reproducible runs) over opinions.
 
 ## Operating Principles
 
@@ -35,6 +41,28 @@ Every role response **must** include:
 ## Tracking
 
 Tickets are tracked on the local JSON board (`runs/board.json`) using the OmniForge runner.  GitHub Issues/Projects can be used as an alternative — see `runner/adapters/github_projects.py`.
+
+## Evidence Rules (non-negotiable)
+
+- If it isn't reproducible, it doesn't count as done.
+- Tests must be runnable locally.
+- Runner logs and artifact snapshots are the source of truth.
+
+## Rollback Philosophy
+
+Failures route to the correct upstream owner:
+- Implementation bugs → `implement`
+- Test gaps → `test`
+- Architectural mismatch → `design` (and possibly `plan` / `intake`)
+
+Escalation occurs when repeated failures on the same stage suggest an upstream root cause.
+
+## Definitions of Done (DoD)
+
+A ticket is `delivered` only when:
+1. Required artifacts exist for each completed stage (e.g. `implementation.md`, `test_report.md`, `delivery.md`).
+2. Objective assertions pass where defined in `manifest.yaml`.
+3. The `deliver` stage includes a runbook and verification steps.
 
 ## Repo Layout
 

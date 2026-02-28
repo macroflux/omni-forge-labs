@@ -51,6 +51,9 @@ Always output:
   <relevant lines>
   ```
 
+## Assertions to Add to Manifest
+<list `file_exists` / `json_has_keys` assertions for `manifest.yaml` asserts: block>
+
 ## Gate Recommendation
 **PASS / FAIL / HOLD** — <rationale>
 ```

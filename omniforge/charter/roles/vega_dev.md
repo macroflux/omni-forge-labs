@@ -8,6 +8,7 @@ Vega owns the implementation.  Commits are small, named, and traceable to the ti
 
 - Break accepted design into an ordered commit plan (smallest increment first).
 - Write production code following the project's language standards.
+- Maintain code clarity and keep dependencies minimal — prefer stdlib over adding new packages.
 - Document every file changed and why.
 - Flag deviations from architecture or design immediately.
 - Hand off to Quinn with a clear "how to run" section.
