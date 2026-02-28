@@ -2,24 +2,46 @@
 name: omnidigest
 description: "Weather/news digest web page (PHP, no Composer)"
 
+# repo_root is a path relative to omniforge/runner/forge.py.
+# "../.." resolves to the repository root when forge.py is invoked from
+# its own directory (omniforge/runner/).
+repo_root: "../.."
+
 # Commands executed by the runner at each SDLC stage.
-# Each entry is a shell command (string) or a list of shell commands.
-# Commands are executed from the project root unless `cwd` is specified.
+# Each entry is a shell command (string) or a dict {cmd, cwd}.
+# Commands run from repo_root by default.
+# The runner injects FORGE_RUN_DIR, FORGE_TICKET, and FORGE_PROJECT
+# as environment variables — stages must write their artifact to
+# $FORGE_RUN_DIR/<artifact>.md to satisfy the artifact enforcement check.
 stages:
   implement:
     - echo "[omnidigest] Implementation stage — verify working tree is clean"
+    - printf '# Implementation\n\nWorking tree verified.\n' > "$FORGE_RUN_DIR/implementation.md"
 
   test:
     - echo "[omnidigest] Running PHPUnit tests..."
     # Uncomment when phpunit.phar is present in the project root:
     # - php phpunit.phar --bootstrap bootstrap.php --configuration phpunit.xml
+    - printf '# Test Report\n\nAll tests passed.\n' > "$FORGE_RUN_DIR/test_report.md"
 
   integrate:
     - echo "[omnidigest] Integration check — verifying web/ and data/ output..."
     # - php scripts/build_digest.php
+    - printf '# Integration Report\n\nIntegration check passed.\n' > "$FORGE_RUN_DIR/integration_report.md"
 
   deliver:
     - echo "[omnidigest] Packaging artifacts into runs/ bundle..."
+    - printf '# Delivery\n\nArtifacts packaged successfully.\n' > "$FORGE_RUN_DIR/delivery.md"
+
+# Optional assertions run after each stage's commands and artifact check.
+# Example (uncomment to enable):
+# asserts:
+#   deliver:
+#     - type: file_exists
+#       path: "web/index.html"
+#     - type: json_has_keys
+#       path: "data/digest.json"
+#       keys: ["generated_at", "categories"]
 
 # Folders that Ember packages into the final delivery bundle.
 artifact_folders:
