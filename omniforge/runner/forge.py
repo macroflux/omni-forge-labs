@@ -52,7 +52,8 @@ SDLC_STAGES: List[str] = [
     "deliver",
 ]
 
-# After a stage's commands succeed, this file must exist in run_dir.
+# After a stage's commands succeed, this file must exist in the per-stage directory
+# (runs/<ticket>/<timestamp>/<stage>/).
 STAGE_ARTIFACTS: Dict[str, str] = {
     "intake": "intake.md",
     "plan": "plan.md",
@@ -110,7 +111,7 @@ def run_command(
         Append stdout + stderr here.
     extra_env:
         Additional environment variables merged on top of ``os.environ``.
-        Used to inject ``FORGE_RUN_DIR``, ``FORGE_TICKET``, etc.
+        Used to inject ``FORGE_RUN_DIR``, ``FORGE_STAGE_DIR``, ``FORGE_TICKET``, etc.
 
     Returns
     -------
@@ -368,11 +369,12 @@ def run_project(
     stage_results: Dict[str, str] = {}
 
     for stage in SDLC_STAGES[start_index:]:
-        cmds_raw = stage_commands.get(stage)
-        if not cmds_raw:
-            # No commands for this stage — silently skip.
+        if stage not in stage_commands:
+            # Stage not part of this project — skip entirely.
             continue
 
+        # `or []` handles a YAML null (None) value — stage key present but no commands.
+        cmds_raw = stage_commands.get(stage) or []
         # Normalise to list.
         if isinstance(cmds_raw, str):
             cmds_raw = [cmds_raw]
@@ -397,6 +399,12 @@ def run_project(
 
         # Update board with current stage.
         board.upsert_ticket(ticket, {"stage": stage})
+
+        # Create per-stage directory for logs and artifacts.
+        stage_dir = os.path.join(run_dir, stage)
+        os.makedirs(stage_dir, exist_ok=True)
+        stage_log = os.path.join(stage_dir, "stage.log")
+        env_extras["FORGE_STAGE_DIR"] = stage_dir
 
         # ── Gate check ────────────────────────────────────────────────────
         if stage in pause_at and not auto:
@@ -437,7 +445,6 @@ def run_project(
 
         stages_run.append(stage)
         print(f"\n▶  Stage: {stage}")
-        stage_log = os.path.join(run_dir, f"{stage}.log")
         failed = False
         fail_reason = ""
 
@@ -459,13 +466,13 @@ def run_project(
         if not failed:
             artifact_name = STAGE_ARTIFACTS.get(stage)
             if artifact_name:
-                artifact_path = os.path.join(run_dir, artifact_name)
+                artifact_path = os.path.join(stage_dir, artifact_name)
                 if not os.path.exists(artifact_path):
                     fail_reason = (
                         f"missing required artifact: {artifact_name} "
                         f"(expected at {artifact_path}). "
                         f"Stage commands must write this file to "
-                        f"$FORGE_RUN_DIR/{artifact_name}"
+                        f"$FORGE_STAGE_DIR/{artifact_name}"
                     )
                     failed = True
 
@@ -587,7 +594,7 @@ def cmd_approve(args: argparse.Namespace) -> None:
     print(
         f"✅  Stage '{args.stage}' approved for ticket {args.ticket}  (by: {approver})"
     )
-    project = ticket.get("project", "<project>")
+    project = ticket.get("project") or "<your_project>"
     print(
         f"   To resume:  python forge.py run --project {project} "
         f"--ticket {args.ticket}"

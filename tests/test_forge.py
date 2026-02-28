@@ -27,7 +27,7 @@ from adapters.local_board import LocalBoard  # noqa: E402
 def _stage_cmd(stage: str) -> str:
     """Single-line shell command that echoes and writes the required artifact."""
     artifact = forge.STAGE_ARTIFACTS.get(stage, f"{stage}.md")
-    return f'echo "{stage} ok" && echo "# {stage}" > "$FORGE_RUN_DIR/{artifact}"'
+    return f'echo "{stage} ok" && echo "# {stage}" > "$FORGE_STAGE_DIR/{artifact}"'
 
 
 def _make_manifest(
@@ -279,8 +279,8 @@ class TestRunProject:
         ticket = board.get_ticket("T-001")
         assert ticket["last_passed_stage"] == "implement"
 
-    def test_skips_stages_with_no_commands(self, tmp_path, monkeypatch):
-        """Stages absent from the manifest are silently skipped."""
+    def test_skips_stages_not_in_manifest(self, tmp_path, monkeypatch):
+        """Stages absent from manifest.stages are silently skipped."""
         board = _setup_project(
             tmp_path,
             monkeypatch,
@@ -296,11 +296,11 @@ class TestRunProject:
         def fake_run_command(cmd, cwd, log_path, extra_env=None):
             calls.append(cmd)
             # Create all artifacts so enforcement passes.
-            if extra_env and "FORGE_RUN_DIR" in extra_env:
-                run_dir = extra_env["FORGE_RUN_DIR"]
-                os.makedirs(run_dir, exist_ok=True)
+            if extra_env and "FORGE_STAGE_DIR" in extra_env:
+                stage_dir = extra_env["FORGE_STAGE_DIR"]
+                os.makedirs(stage_dir, exist_ok=True)
                 for artifact in forge.STAGE_ARTIFACTS.values():
-                    p = os.path.join(run_dir, artifact)
+                    p = os.path.join(stage_dir, artifact)
                     if not os.path.exists(p):
                         with open(p, "w", encoding="utf-8") as f:
                             f.write("mock artifact\n")
@@ -375,6 +375,61 @@ class TestRunProject:
         )
         # Seed an approval before running.
         board.upsert_ticket("T-001", {"approvals": {"test": True}})
+        result = forge.run_project("testproject", "T-001", auto=False, board=board)
+        assert result is True
+
+
+# ---------------------------------------------------------------------------
+# Empty command list stages
+# ---------------------------------------------------------------------------
+
+
+class TestEmptyCommandStages:
+    def test_gate_check_runs_for_empty_command_list(self, tmp_path, monkeypatch):
+        """A stage present in manifest.stages with an empty command list still
+        triggers a gate pause (it is not silently skipped)."""
+        board = _setup_project(
+            tmp_path,
+            monkeypatch,
+            stages={
+                "design": [],
+                "implement": [_stage_cmd("implement")],
+                "test": [_stage_cmd("test")],
+            },
+            pause_at=["design"],
+        )
+        result = forge.run_project("testproject", "T-001", auto=False, board=board)
+        assert result is False
+        assert board.get_ticket("T-001")["status"] == "paused_at_design"
+
+    def test_null_command_stage_runs_gate(self, tmp_path, monkeypatch):
+        """A stage present in manifest.stages with a null value still triggers
+        gate check (null normalises to empty list, not a skip)."""
+        board = _setup_project(
+            tmp_path,
+            monkeypatch,
+            stages={
+                "design": None,
+                "implement": [_stage_cmd("implement")],
+                "test": [_stage_cmd("test")],
+            },
+            pause_at=["design"],
+        )
+        result = forge.run_project("testproject", "T-001", auto=False, board=board)
+        assert result is False
+        assert board.get_ticket("T-001")["status"] == "paused_at_design"
+
+    def test_stage_absent_from_manifest_is_fully_skipped(self, tmp_path, monkeypatch):
+        """A stage not present as a key in manifest.stages is completely skipped,
+        including gate checks and artifact enforcement."""
+        board = _setup_project(
+            tmp_path,
+            monkeypatch,
+            # Only 'deliver' in manifest; all earlier stages absent → skipped.
+            stages={"deliver": [_stage_cmd("deliver")]},
+            # Gate on a stage that is NOT in the manifest — should not trigger.
+            pause_at=["design"],
+        )
         result = forge.run_project("testproject", "T-001", auto=False, board=board)
         assert result is True
 
@@ -491,7 +546,7 @@ class TestApproveFlow:
 
 class TestArtifactEnforcement:
     def test_fails_when_artifact_missing(self, tmp_path, monkeypatch):
-        """Stage fails when its required .md artifact is absent from run_dir."""
+        """Stage fails when its required .md artifact is absent from stage_dir."""
         board = _setup_project(
             tmp_path,
             monkeypatch,
@@ -723,11 +778,11 @@ class TestRepoCwd:
 
         def fake_run_command(cmd, cwd, log_path, extra_env=None):
             cwd_seen.append(cwd)
-            if extra_env and "FORGE_RUN_DIR" in extra_env:
-                run_dir = extra_env["FORGE_RUN_DIR"]
-                os.makedirs(run_dir, exist_ok=True)
+            if extra_env and "FORGE_STAGE_DIR" in extra_env:
+                stage_dir = extra_env["FORGE_STAGE_DIR"]
+                os.makedirs(stage_dir, exist_ok=True)
                 for artifact in forge.STAGE_ARTIFACTS.values():
-                    p = os.path.join(run_dir, artifact)
+                    p = os.path.join(stage_dir, artifact)
                     if not os.path.exists(p):
                         with open(p, "w", encoding="utf-8") as f:
                             f.write("mock\n")
@@ -751,11 +806,11 @@ class TestRepoCwd:
 
         def fake_run_command(cmd, cwd, log_path, extra_env=None):
             cwd_seen.append(cwd)
-            if extra_env and "FORGE_RUN_DIR" in extra_env:
-                run_dir = extra_env["FORGE_RUN_DIR"]
-                os.makedirs(run_dir, exist_ok=True)
+            if extra_env and "FORGE_STAGE_DIR" in extra_env:
+                stage_dir = extra_env["FORGE_STAGE_DIR"]
+                os.makedirs(stage_dir, exist_ok=True)
                 for artifact in forge.STAGE_ARTIFACTS.values():
-                    p = os.path.join(run_dir, artifact)
+                    p = os.path.join(stage_dir, artifact)
                     if not os.path.exists(p):
                         with open(p, "w", encoding="utf-8") as f:
                             f.write("mock\n")
