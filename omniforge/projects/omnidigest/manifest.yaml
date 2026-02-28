@@ -1,0 +1,30 @@
+# OmniDigest — Project Manifest
+name: omnidigest
+description: "Weather/news digest web page (PHP, no Composer)"
+
+# Commands executed by the runner at each SDLC stage.
+# Each entry is a shell command (string) or a list of shell commands.
+# Commands are executed from the project root unless `cwd` is specified.
+stages:
+  implement:
+    - echo "[omnidigest] Implementation stage — verify working tree is clean"
+
+  test:
+    - echo "[omnidigest] Running PHPUnit tests..."
+    # Uncomment when phpunit.phar is present in the project root:
+    # - php phpunit.phar --bootstrap bootstrap.php --configuration phpunit.xml
+
+  integrate:
+    - echo "[omnidigest] Integration check — verifying web/ and data/ output..."
+    # - php scripts/build_digest.php
+
+  deliver:
+    - echo "[omnidigest] Packaging artifacts into runs/ bundle..."
+
+# Folders that Ember packages into the final delivery bundle.
+artifact_folders:
+  - web/
+  - data/
+
+# Optional: command used to serve the project locally for manual verification.
+serve_command: "php -S localhost:8080 -t web/"
