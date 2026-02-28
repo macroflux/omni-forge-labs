@@ -1,0 +1,22 @@
+# OmniDigest — Gate Configuration
+
+# Stages where the runner pauses and waits for explicit client approval.
+# These map to the three ⛔ client gates defined in sdlc_stages.md.
+pause_at:
+  - design
+  - test
+  - deliver
+
+# Default rollback targets for this project.
+# If a stage fails, the runner rolls back to the mapped stage.
+rollback:
+  plan: intake
+  design: plan
+  research: design
+  implement: design
+  test: implement
+  integrate: implement
+  deliver: test
+
+# Number of rollbacks to the same stage before auto-escalating upstream.
+escalation_threshold: 2

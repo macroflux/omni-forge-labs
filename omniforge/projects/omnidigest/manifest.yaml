@@ -1,0 +1,63 @@
+# OmniDigest — Project Manifest
+name: omnidigest
+description: "Weather/news digest web page (PHP, no Composer)"
+
+# repo_root is a path relative to omniforge/runner/forge.py.
+# "../.." resolves to the repository root when forge.py is invoked from
+# its own directory (omniforge/runner/).
+repo_root: "../.."
+
+# Commands executed by the runner at each SDLC stage.
+# Each entry is a shell command (string) or a dict {cmd, cwd}.
+# Commands run from repo_root by default.
+# The runner injects FORGE_RUN_DIR, FORGE_STAGE_DIR, FORGE_TICKET, and FORGE_PROJECT
+# as environment variables — stages must write their artifact to
+# $FORGE_STAGE_DIR/<artifact>.md to satisfy the artifact enforcement check.
+stages:
+  implement:
+    - echo "[omnidigest] Running build script..."
+    - php scripts/build_digest.php
+    - printf '# Implementation\n\nBuild script executed successfully.\n' > "$FORGE_STAGE_DIR/implementation.md"
+
+  test:
+    - echo "[omnidigest] Smoke test — verifying digest.json exists..."
+    - test -f web/digest.json
+    - printf '# Test Report\n\nSmoke tests passed.\n' > "$FORGE_STAGE_DIR/test_report.md"
+
+  integrate:
+    - echo "[omnidigest] Integration validation — checking digest structure..."
+    - test -f web/digest.json
+    - printf '# Integration Report\n\nIntegration checks passed.\n' > "$FORGE_STAGE_DIR/integration_report.md"
+
+  deliver:
+    - echo "[omnidigest] Final rebuild before packaging..."
+    - php scripts/build_digest.php
+    - printf '# Delivery\n\nOmniDigest ready for deployment.\n' > "$FORGE_STAGE_DIR/delivery.md"
+
+# Assertions run after each stage's commands and artifact check.
+# Failures count as stage failures and trigger rollback.
+asserts:
+  implement:
+    - type: file_exists
+      path: "web/digest.json"
+
+  integrate:
+    - type: json_has_keys
+      path: "web/digest.json"
+      keys: ["generated_at", "categories"]
+    - type: json_array_min_length
+      path: "web/digest.json"
+      key: "categories.Technology"
+      min: 1
+
+  deliver:
+    - type: file_exists
+      path: "web/digest.json"
+
+# Folders that Ember packages into the final delivery bundle.
+artifact_folders:
+  - web/
+  - data/
+
+# Optional: command used to serve the project locally for manual verification.
+serve_command: "php -S localhost:8080 -t web/"
