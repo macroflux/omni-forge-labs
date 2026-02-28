@@ -156,6 +156,10 @@ def run_asserts(
         Checks that ``path`` exists (relative to *resolved_cwd*, or absolute).
     ``json_has_keys``
         Checks that ``path`` is valid JSON and contains every key in ``keys``.
+    ``json_array_min_length``
+        Checks that the value reached by a dot-path ``key`` inside ``path`` is
+        a list with at least ``min`` items (default: 1).
+        Dot-path example: ``"categories.Technology"``.
     """
     for assertion in asserts:
         atype = assertion.get("type")
@@ -180,6 +184,37 @@ def run_asserts(
             missing = [k for k in assertion.get("keys", []) if k not in data]
             if missing:
                 return f"json_has_keys failed: {full_path} missing keys: {missing}"
+
+        elif atype == "json_array_min_length":
+            if not os.path.exists(full_path):
+                return f"json_array_min_length failed: {full_path} not found"
+            try:
+                with open(full_path, encoding="utf-8") as fh:
+                    data = json.load(fh)
+            except (json.JSONDecodeError, OSError) as exc:
+                return f"json_array_min_length failed: cannot read {full_path}: {exc}"
+            key_path = assertion.get("key", "")
+            min_len = assertion.get("min", 1)
+            # Traverse dot-path keys (e.g. "categories.Technology").
+            # node starts as the parsed JSON object and narrows at each step.
+            node: Dict[str, Any] = data
+            for part in key_path.split("."):
+                if not isinstance(node, dict) or part not in node:
+                    return (
+                        f"json_array_min_length failed: key path '{key_path}' "
+                        f"not found in {full_path}"
+                    )
+                node = node[part]
+            if not isinstance(node, list):
+                return (
+                    f"json_array_min_length failed: '{key_path}' is not a list "
+                    f"in {full_path}"
+                )
+            if len(node) < min_len:
+                return (
+                    f"json_array_min_length failed: '{key_path}' has {len(node)} "
+                    f"items, need >= {min_len} in {full_path}"
+                )
 
         else:
             return f"Unknown assertion type: {atype!r}"

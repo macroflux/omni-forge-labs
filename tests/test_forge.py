@@ -241,6 +241,88 @@ class TestRunAsserts:
     def test_empty_asserts_returns_none(self, tmp_path):
         assert forge.run_asserts([], str(tmp_path)) is None
 
+    def test_json_array_min_length_passes(self, tmp_path):
+        target = tmp_path / "data.json"
+        target.write_text('{"categories": {"Technology": [1, 2, 3]}}')
+        result = forge.run_asserts(
+            [
+                {
+                    "type": "json_array_min_length",
+                    "path": str(target),
+                    "key": "categories.Technology",
+                    "min": 1,
+                }
+            ],
+            str(tmp_path),
+        )
+        assert result is None
+
+    def test_json_array_min_length_fails_when_too_short(self, tmp_path):
+        target = tmp_path / "data.json"
+        target.write_text('{"categories": {"Technology": []}}')
+        result = forge.run_asserts(
+            [
+                {
+                    "type": "json_array_min_length",
+                    "path": str(target),
+                    "key": "categories.Technology",
+                    "min": 1,
+                }
+            ],
+            str(tmp_path),
+        )
+        assert result is not None
+        assert "json_array_min_length" in result
+
+    def test_json_array_min_length_fails_on_missing_key_path(self, tmp_path):
+        target = tmp_path / "data.json"
+        target.write_text('{"categories": {}}')
+        result = forge.run_asserts(
+            [
+                {
+                    "type": "json_array_min_length",
+                    "path": str(target),
+                    "key": "categories.Technology",
+                    "min": 1,
+                }
+            ],
+            str(tmp_path),
+        )
+        assert result is not None
+        assert "not found" in result
+
+    def test_json_array_min_length_fails_when_value_not_list(self, tmp_path):
+        target = tmp_path / "data.json"
+        target.write_text('{"categories": {"Technology": "not_a_list"}}')
+        result = forge.run_asserts(
+            [
+                {
+                    "type": "json_array_min_length",
+                    "path": str(target),
+                    "key": "categories.Technology",
+                    "min": 1,
+                }
+            ],
+            str(tmp_path),
+        )
+        assert result is not None
+        assert "not a list" in result
+
+    def test_json_array_min_length_fails_when_file_missing(self, tmp_path):
+        result = forge.run_asserts(
+            [
+                {
+                    "type": "json_array_min_length",
+                    "path": str(tmp_path / "gone.json"),
+                    "key": "x.y",
+                    "min": 1,
+                }
+            ],
+            str(tmp_path),
+        )
+        assert result is not None
+        assert "json_array_min_length" in result
+
 
 # ---------------------------------------------------------------------------
 # run_project — core SDLC

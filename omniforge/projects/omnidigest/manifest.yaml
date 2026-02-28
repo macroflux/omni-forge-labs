@@ -10,38 +10,49 @@ repo_root: "../.."
 # Commands executed by the runner at each SDLC stage.
 # Each entry is a shell command (string) or a dict {cmd, cwd}.
 # Commands run from repo_root by default.
-# The runner injects FORGE_RUN_DIR, FORGE_TICKET, and FORGE_PROJECT
+# The runner injects FORGE_RUN_DIR, FORGE_STAGE_DIR, FORGE_TICKET, and FORGE_PROJECT
 # as environment variables — stages must write their artifact to
-# $FORGE_RUN_DIR/<artifact>.md to satisfy the artifact enforcement check.
+# $FORGE_STAGE_DIR/<artifact>.md to satisfy the artifact enforcement check.
 stages:
   implement:
-    - echo "[omnidigest] Implementation stage — verify working tree is clean"
-    - printf '# Implementation\n\nWorking tree verified.\n' > "$FORGE_RUN_DIR/implementation.md"
+    - echo "[omnidigest] Running build script..."
+    - php scripts/build_digest.php
+    - printf '# Implementation\n\nBuild script executed successfully.\n' > "$FORGE_STAGE_DIR/implementation.md"
 
   test:
-    - echo "[omnidigest] Running PHPUnit tests..."
-    # Uncomment when phpunit.phar is present in the project root:
-    # - php phpunit.phar --bootstrap bootstrap.php --configuration phpunit.xml
-    - printf '# Test Report\n\nAll tests passed.\n' > "$FORGE_RUN_DIR/test_report.md"
+    - echo "[omnidigest] Smoke test — verifying digest.json exists..."
+    - test -f web/digest.json
+    - printf '# Test Report\n\nSmoke tests passed.\n' > "$FORGE_STAGE_DIR/test_report.md"
 
   integrate:
-    - echo "[omnidigest] Integration check — verifying web/ and data/ output..."
-    # - php scripts/build_digest.php
-    - printf '# Integration Report\n\nIntegration check passed.\n' > "$FORGE_RUN_DIR/integration_report.md"
+    - echo "[omnidigest] Integration validation — checking digest structure..."
+    - test -f web/digest.json
+    - printf '# Integration Report\n\nIntegration checks passed.\n' > "$FORGE_STAGE_DIR/integration_report.md"
 
   deliver:
-    - echo "[omnidigest] Packaging artifacts into runs/ bundle..."
-    - printf '# Delivery\n\nArtifacts packaged successfully.\n' > "$FORGE_RUN_DIR/delivery.md"
+    - echo "[omnidigest] Final rebuild before packaging..."
+    - php scripts/build_digest.php
+    - printf '# Delivery\n\nOmniDigest ready for deployment.\n' > "$FORGE_STAGE_DIR/delivery.md"
 
-# Optional assertions run after each stage's commands and artifact check.
-# Example (uncomment to enable):
-# asserts:
-#   deliver:
-#     - type: file_exists
-#       path: "web/index.html"
-#     - type: json_has_keys
-#       path: "data/digest.json"
-#       keys: ["generated_at", "categories"]
+# Assertions run after each stage's commands and artifact check.
+# Failures count as stage failures and trigger rollback.
+asserts:
+  implement:
+    - type: file_exists
+      path: "web/digest.json"
+
+  integrate:
+    - type: json_has_keys
+      path: "web/digest.json"
+      keys: ["generated_at", "categories"]
+    - type: json_array_min_length
+      path: "web/digest.json"
+      key: "categories.Technology"
+      min: 1
+
+  deliver:
+    - type: file_exists
+      path: "web/digest.json"
 
 # Folders that Ember packages into the final delivery bundle.
 artifact_folders:
