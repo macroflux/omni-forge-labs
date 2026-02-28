@@ -91,3 +91,87 @@ class TestPersistence:
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
         assert "T-001" in data
+
+
+class TestEnsureTicketDefaults:
+    def test_new_ticket_gets_standard_shape(self, board):
+        ticket = board.upsert_ticket("T-001", {"project": "omnidigest"})
+        assert ticket["ticket_id"] == "T-001"
+        assert ticket["stage"] == "intake"
+        assert ticket["status"] == "pending"
+        assert ticket["approvals"] == {}
+        assert ticket["approvals_meta"] == {}
+        assert ticket["rollback_counts"] == {}
+        assert ticket["history"] == []
+
+    def test_existing_values_not_overwritten(self, board):
+        board.upsert_ticket("T-001", {"stage": "implement", "status": "running"})
+        ticket = board.upsert_ticket("T-001", {"last_log": "implement.log"})
+        assert ticket["stage"] == "implement"
+        assert ticket["status"] == "running"
+
+
+class TestAppendEvent:
+    def test_appends_event_to_history(self, board):
+        board.upsert_ticket("T-001", {"project": "test"})
+        board.append_event("T-001", "stage_passed", {"stage": "plan"})
+        ticket = board.get_ticket("T-001")
+        assert len(ticket["history"]) == 1
+        evt = ticket["history"][0]
+        assert evt["type"] == "stage_passed"
+        assert evt["payload"] == {"stage": "plan"}
+        assert "at" in evt
+
+    def test_appends_multiple_events_in_order(self, board):
+        board.upsert_ticket("T-001", {})
+        board.append_event("T-001", "first", {})
+        board.append_event("T-001", "second", {})
+        history = board.get_ticket("T-001")["history"]
+        assert history[0]["type"] == "first"
+        assert history[1]["type"] == "second"
+
+    def test_creates_ticket_if_missing(self, board):
+        ticket = board.append_event("T-999", "stage_passed", {"stage": "intake"})
+        assert ticket["ticket_id"] == "T-999"
+        assert len(ticket["history"]) == 1
+
+    def test_empty_payload_defaults_to_empty_dict(self, board):
+        board.upsert_ticket("T-001", {})
+        board.append_event("T-001", "ping")
+        evt = board.get_ticket("T-001")["history"][0]
+        assert evt["payload"] == {}
+
+
+class TestApproveStage:
+    def test_sets_approval_flag(self, board):
+        board.upsert_ticket("T-001", {"project": "test"})
+        board.approve_stage("T-001", "design", by="Chris")
+        ticket = board.get_ticket("T-001")
+        assert ticket["approvals"]["design"] is True
+
+    def test_records_approvals_meta(self, board):
+        board.upsert_ticket("T-001", {})
+        board.approve_stage("T-001", "design", by="Chris")
+        meta = board.get_ticket("T-001")["approvals_meta"]["design"]
+        assert meta["by"] == "Chris"
+        assert "at" in meta
+
+    def test_defaults_approver_to_client(self, board):
+        board.upsert_ticket("T-001", {})
+        board.approve_stage("T-001", "test")
+        meta = board.get_ticket("T-001")["approvals_meta"]["test"]
+        assert meta["by"] == "client"
+
+    def test_appends_approved_history_event(self, board):
+        board.upsert_ticket("T-001", {})
+        board.approve_stage("T-001", "design", by="Alex")
+        history = board.get_ticket("T-001")["history"]
+        assert any(
+            e["type"] == "approved" and e["payload"]["stage"] == "design"
+            for e in history
+        )
+
+    def test_creates_ticket_if_missing(self, board):
+        ticket = board.approve_stage("T-999", "deliver", by="Sam")
+        assert ticket["approvals"]["deliver"] is True
+        assert ticket["ticket_id"] == "T-999"

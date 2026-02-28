@@ -479,8 +479,9 @@ class TestApproveFlow:
         args = argparse.Namespace(ticket="T-001", stage="design", by="Alice")
         forge.cmd_approve(args)
 
-        events = [e["event"] for e in board.get_ticket("T-001").get("history", [])]
-        assert "approved" in events
+        # approve_stage stores events with "type" key
+        event_types = [e.get("type") for e in board.get_ticket("T-001").get("history", [])]
+        assert "approved" in event_types
 
 
 # ---------------------------------------------------------------------------

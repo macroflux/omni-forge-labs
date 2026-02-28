@@ -582,28 +582,12 @@ def cmd_approve(args: argparse.Namespace) -> None:
     from adapters.local_board import LocalBoard  # noqa: PLC0415
 
     board = LocalBoard()
-    existing = board.get_ticket(args.ticket) or {}
-    approvals = dict(existing.get("approvals") or {})
-    approvals_meta = dict(existing.get("approvals_meta") or {})
-
     approver = getattr(args, "by", None) or "unknown"
-    at_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    approvals[args.stage] = True
-    approvals_meta[args.stage] = {"by": approver, "at_iso": at_iso}
-
-    board.upsert_ticket(
-        args.ticket,
-        {"approvals": approvals, "approvals_meta": approvals_meta},
-    )
-    _append_history(
-        board,
-        args.ticket,
-        {"event": "approved", "stage": args.stage, "by": approver, "at_iso": at_iso},
-    )
+    ticket = board.approve_stage(args.ticket, args.stage, by=approver)
     print(
         f"✅  Stage '{args.stage}' approved for ticket {args.ticket}  (by: {approver})"
     )
-    project = existing.get("project", "<project>")
+    project = ticket.get("project", "<project>")
     print(
         f"   To resume:  python forge.py run --project {project} "
         f"--ticket {args.ticket}"

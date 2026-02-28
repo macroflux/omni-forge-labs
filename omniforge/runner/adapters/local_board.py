@@ -8,7 +8,13 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
 
 # Default board path relative to this file: ../../runs/board.json
 _DEFAULT_BOARD_PATH = os.path.join(
@@ -45,6 +51,19 @@ class LocalBoard:
             json.dump(data, fh, indent=2)
             fh.write("\n")
 
+    @staticmethod
+    def _ensure_ticket_defaults(ticket: Dict[str, Any], ticket_id: str) -> Dict[str, Any]:
+        """Populate ticket defaults without overwriting existing values."""
+        ticket.setdefault("ticket_id", ticket_id)
+        ticket.setdefault("project", None)
+        ticket.setdefault("stage", "intake")
+        ticket.setdefault("status", "pending")
+        ticket.setdefault("approvals", {})
+        ticket.setdefault("approvals_meta", {})
+        ticket.setdefault("rollback_counts", {})
+        ticket.setdefault("history", [])
+        return ticket
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -67,9 +86,11 @@ class LocalBoard:
         data = self._load()
         if ticket_id not in data:
             data[ticket_id] = {}
-        data[ticket_id].update(fields)
+        ticket = self._ensure_ticket_defaults(data[ticket_id], ticket_id)
+        ticket.update(fields)
+        data[ticket_id] = ticket
         self._save(data)
-        return data[ticket_id]
+        return ticket
 
     def get_ticket(self, ticket_id: str) -> Optional[Dict[str, Any]]:
         """Return the ticket record, or *None* if not found."""
@@ -93,3 +114,74 @@ class LocalBoard:
         del data[ticket_id]
         self._save(data)
         return True
+
+    def append_event(
+        self,
+        ticket_id: str,
+        event_type: str,
+        payload: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Append a history event to the ticket.
+
+        Parameters
+        ----------
+        ticket_id:
+            Unique ticket identifier.
+        event_type:
+            Short label for the event (e.g. ``"stage_passed"``, ``"approved"``).
+        payload:
+            Optional dict with additional event data.
+
+        Returns
+        -------
+        Dict[str, Any]
+            The full ticket record after appending the event.
+        """
+        data = self._load()
+        if ticket_id not in data:
+            data[ticket_id] = {}
+        ticket = self._ensure_ticket_defaults(data[ticket_id], ticket_id)
+        ticket["history"].append({
+            "at": _now_iso(),
+            "type": event_type,
+            "payload": payload or {},
+        })
+        data[ticket_id] = ticket
+        self._save(data)
+        return ticket
+
+    def approve_stage(
+        self,
+        ticket_id: str,
+        stage: str,
+        by: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Record a client approval for a gate stage.
+
+        Sets ``approvals[stage] = True``, records metadata in
+        ``approvals_meta[stage]``, and appends an ``"approved"`` history event.
+
+        Parameters
+        ----------
+        ticket_id:
+            Unique ticket identifier.
+        stage:
+            SDLC stage being approved (e.g. ``"design"``).
+        by:
+            Approver name.  Defaults to ``"client"`` when omitted.
+
+        Returns
+        -------
+        Dict[str, Any]
+            The full ticket record after recording the approval.
+        """
+        approver = by or "client"
+        data = self._load()
+        if ticket_id not in data:
+            data[ticket_id] = {}
+        ticket = self._ensure_ticket_defaults(data[ticket_id], ticket_id)
+        ticket["approvals"][stage] = True
+        ticket["approvals_meta"][stage] = {"by": approver, "at": _now_iso()}
+        data[ticket_id] = ticket
+        self._save(data)
+        return self.append_event(ticket_id, "approved", {"stage": stage, "by": approver})
