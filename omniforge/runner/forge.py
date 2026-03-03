@@ -17,6 +17,7 @@ import argparse
 import datetime
 import json
 import os
+import shutil
 import subprocess
 import sys
 from typing import Any, Dict, List, Optional
@@ -36,6 +37,9 @@ _RUNS_DIR = os.path.join(os.path.dirname(_REPO_ROOT), "runs")
 if not os.path.isabs(_RUNS_DIR) or _RUNS_DIR == "/runs":
     _RUNS_DIR = os.path.join(_REPO_ROOT, "..", "runs")
 _RUNS_DIR = os.path.normpath(_RUNS_DIR)
+
+# Workspace directory for editable ticket docs (before run snapshot)
+_WORK_DIR = os.path.join(_RUNS_DIR, "work")
 
 # ---------------------------------------------------------------------------
 # SDLC stage order and required artifact names
@@ -86,6 +90,39 @@ def load_gates(project: str) -> Dict[str, Any]:
         raise FileNotFoundError(f"Gates config not found: {path}")
     with open(path, encoding="utf-8") as fh:
         return yaml.safe_load(fh)
+
+
+def copy_workspace_to_run(ticket: str, run_dir: str) -> None:
+    """Copy workspace docs (intake, plan, design, research) into run stage folders.
+
+    This snapshots editable workspace files into the immutable run evidence.
+    For early stages (intake/plan/design/research), the workspace file becomes
+    the required artifact if no command generates one.
+    """
+    work_dir = os.path.join(_WORK_DIR, ticket)
+    if not os.path.isdir(work_dir):
+        return
+
+    # Map workspace files to their stage artifact names
+    workspace_to_artifact = {
+        "intake.md": ("intake", "intake.md"),
+        "plan.md": ("plan", "plan.md"),
+        "design.md": ("design", "design.md"),
+        "research.md": ("research", "research.md"),
+    }
+
+    for ws_file, (stage, artifact_name) in workspace_to_artifact.items():
+        src = os.path.join(work_dir, ws_file)
+        if os.path.isfile(src):
+            stage_dir = os.path.join(run_dir, stage)
+            os.makedirs(stage_dir, exist_ok=True)
+            dst = os.path.join(stage_dir, artifact_name)
+            # Only copy if artifact doesn't already exist (don't overwrite command output)
+            if not os.path.exists(dst):
+                try:
+                    shutil.copy2(src, dst)
+                except Exception as e:
+                    print(f"⚠  Workspace snapshot failed for {ticket} {ws_file}: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -345,6 +382,9 @@ def run_project(
     timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
     run_dir = os.path.join(_RUNS_DIR, ticket, timestamp)
     os.makedirs(run_dir, exist_ok=True)
+
+    # Copy workspace docs (intake, plan, design, research) into run as starting artifacts
+    copy_workspace_to_run(ticket, run_dir)
 
     # Resolve working directory for commands.
     # manifest.repo_root is a path relative to _RUNNER_DIR (or absolute).

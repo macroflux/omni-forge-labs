@@ -5,7 +5,7 @@ description: "Weather/news digest web page (PHP, no Composer)"
 # repo_root is a path relative to omniforge/runner/forge.py.
 # "../.." resolves to the repository root when forge.py is invoked from
 # its own directory (omniforge/runner/).
-repo_root: "../.."
+repo_root: "C:/dev/omni-feed"
 
 # Commands executed by the runner at each SDLC stage.
 # Each entry is a shell command (string) or a dict {cmd, cwd}.
@@ -14,25 +14,40 @@ repo_root: "../.."
 # as environment variables — stages must write their artifact to
 # $FORGE_STAGE_DIR/<artifact>.md to satisfy the artifact enforcement check.
 stages:
+  # Early stages: noop commands to enforce workspace docs are present.
+  # Artifacts (intake.md, plan.md, etc.) are copied from runs/work/<ticket>/
+  # by copy_workspace_to_run() before the stage loop starts.
+  intake:
+    - echo [omnidigest] Intake — snapshot workspace into run evidence...
+
+  plan:
+    - echo [omnidigest] Plan — ready for execution planning...
+
+  design:
+    - echo [omnidigest] Design — validating architecture notes...
+
+  research:
+    - echo [omnidigest] Research — validating tech choices...
+
   implement:
-    - echo "[omnidigest] Running build script..."
+    - echo [omnidigest] Running build script...
     - php scripts/build_digest.php
-    - printf '# Implementation\n\nBuild script executed successfully.\n' > "$FORGE_STAGE_DIR/implementation.md"
+    - php -r "file_put_contents(getenv('FORGE_STAGE_DIR').DIRECTORY_SEPARATOR.'implementation.md', \"# Implementation\n\nBuild script executed successfully.\n\");"
 
   test:
-    - echo "[omnidigest] Smoke test — verifying digest.json exists..."
-    - test -f web/digest.json
-    - printf '# Test Report\n\nSmoke tests passed.\n' > "$FORGE_STAGE_DIR/test_report.md"
+    - echo [omnidigest] Smoke test — verifying digest.json exists...
+    - php -r "if(!file_exists('web/digest.json')) {fwrite(STDERR,\"digest.json missing\n\"); exit(1);} "
+    - php -r "file_put_contents(getenv('FORGE_STAGE_DIR').DIRECTORY_SEPARATOR.'test_report.md', \"# Test Report\n\nSmoke tests passed.\n\");"
 
   integrate:
-    - echo "[omnidigest] Integration validation — checking digest structure..."
-    - test -f web/digest.json
-    - printf '# Integration Report\n\nIntegration checks passed.\n' > "$FORGE_STAGE_DIR/integration_report.md"
+    - echo [omnidigest] Integration validation — checking digest structure...
+    - php -r "$d=json_decode(file_get_contents('web/digest.json'), true); if(!$d || !isset($d['generated_at'],$d['categories'])) {fwrite(STDERR,\"digest.json invalid\n\"); exit(1);} "
+    - php -r "file_put_contents(getenv('FORGE_STAGE_DIR').DIRECTORY_SEPARATOR.'integration_report.md', \"# Integration Report\n\nIntegration checks passed.\n\");"
 
   deliver:
-    - echo "[omnidigest] Final rebuild before packaging..."
+    - echo [omnidigest] Final rebuild before packaging...
     - php scripts/build_digest.php
-    - printf '# Delivery\n\nOmniDigest ready for deployment.\n' > "$FORGE_STAGE_DIR/delivery.md"
+    - php -r "file_put_contents(getenv('FORGE_STAGE_DIR').DIRECTORY_SEPARATOR.'delivery.md', \"# Delivery\n\nOmniDigest ready for deployment.\n\");"
 
 # Assertions run after each stage's commands and artifact check.
 # Failures count as stage failures and trigger rollback.
@@ -48,6 +63,10 @@ asserts:
     - type: json_array_min_length
       path: "web/digest.json"
       key: "categories.Technology"
+      min: 1
+    - type: json_array_min_length
+      path: "web/digest.json"
+      key: "categories.AI"
       min: 1
 
   deliver:

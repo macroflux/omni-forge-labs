@@ -1,0 +1,12 @@
+{% extends "layout.html" %}
+{% block content %}
+<h2 style="margin:0 0 10px 0;">Playbook: <code>{{ name }}</code></h2>
+
+<div style="margin-bottom:16px;">
+  <a href="javascript:history.back()">&larr; Back</a>
+</div>
+
+<div class="card">
+  <pre style="white-space:pre-wrap;">{{ content }}</pre>
+</div>
+{% endblock %}

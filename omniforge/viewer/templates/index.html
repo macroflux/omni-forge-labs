@@ -1,0 +1,59 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="row" style="margin-bottom:20px;">
+  <div class="card" style="flex:0 0 auto;">
+    <h3>Create Ticket</h3>
+    <form method="post" action="{{ url_for('create_ticket') }}">
+      <label>Project</label><br>
+      <select name="project" id="projectSelect" style="width:200px; padding:6px;">
+        <option value="">Loading...</option>
+      </select>
+      <br><br>
+      <label>Ticket ID <span class="muted">(optional)</span></label><br>
+      <input name="ticket_id" placeholder="T-001" style="width:200px; padding:6px;">
+      <br><br>
+      <button class="btn" type="submit">Create</button>
+    </form>
+  </div>
+</div>
+
+<script>
+fetch('/api/projects')
+  .then(r => r.json())
+  .then(data => {
+    const sel = document.getElementById('projectSelect');
+    sel.innerHTML = data.projects.map(p => `<option value="${p}">${p}</option>`).join('');
+  });
+</script>
+
+<h2 style="margin:0 0 8px 0;">Tickets</h2>
+
+{% if not tickets %}
+  <div class="muted">No tickets yet.</div>
+{% else %}
+<table>
+  <thead>
+    <tr>
+      <th>Ticket</th>
+      <th>Project</th>
+      <th>Status</th>
+      <th>Stage</th>
+      <th>Last Passed</th>
+      <th>Run Dir</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for t in tickets %}
+    <tr>
+      <td><a href="{{ url_for('ticket', ticket_id=t.ticket_id) }}"><code>{{ t.ticket_id }}</code></a></td>
+      <td>{{ t.project or "?" }}</td>
+      <td><span class="pill">{{ t.status or "unknown" }}</span></td>
+      <td>{{ t.stage or "-" }}</td>
+      <td>{{ t.last_passed_stage or "-" }}</td>
+      <td class="muted">{{ t.run_dir or "-" }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

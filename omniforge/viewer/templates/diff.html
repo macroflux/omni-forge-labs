@@ -1,0 +1,76 @@
+{% extends "layout.html" %}
+{% block content %}
+<h2 style="margin:0 0 10px 0;">Diff — <code>{{ ticket_id }}</code></h2>
+
+{% if mode == 'workspace' %}
+{# Workspace vs Last Run diff #}
+<div class="card" style="margin-bottom:16px;">
+  <h3>Compare Workspace vs Last Run</h3>
+  <form method="get" action="{{ url_for('workspace_diff', ticket_id=ticket_id) }}">
+    <div class="row" style="gap:12px; align-items:flex-end;">
+      <div>
+        <label>Stage</label><br>
+        <select name="stage" style="padding:6px; min-width:180px;">
+          <option value="">Select stage...</option>
+          {% for s in stages %}
+            <option value="{{ s }}" {% if s == selected_stage %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <button class="btn" type="submit">Compare</button>
+      </div>
+    </div>
+  </form>
+  <p style="margin-top:8px; color:#666; font-size:0.9em;">
+    Shows what changed in your workspace since the last run.
+  </p>
+</div>
+{% else %}
+{# Run vs Run diff #}
+<div class="card" style="margin-bottom:16px;">
+  <h3>Compare run_report.md</h3>
+  <form method="get" action="{{ url_for('diff_runs', ticket_id=ticket_id) }}">
+    <div class="row" style="gap:12px; align-items:flex-end;">
+      <div>
+        <label>Run A</label><br>
+        <select name="a" style="padding:6px; min-width:180px;">
+          <option value="">Select...</option>
+          {% for ts in runs %}
+            <option value="{{ ts }}" {% if ts == a %}selected{% endif %}>{{ ts }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Run B</label><br>
+        <select name="b" style="padding:6px; min-width:180px;">
+          <option value="">Select...</option>
+          {% for ts in runs %}
+            <option value="{{ ts }}" {% if ts == b %}selected{% endif %}>{{ ts }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <button class="btn" type="submit">Compare</button>
+      </div>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+{% if diff %}
+<div class="card">
+  <h3>Unified Diff</h3>
+  <pre>{{ diff }}</pre>
+</div>
+{% endif %}
+
+<div style="margin-top:16px; display:flex; gap:20px;">
+  <a href="{{ url_for('ticket', ticket_id=ticket_id) }}">&larr; Back to ticket</a>
+  {% if mode == 'workspace' %}
+  <a href="{{ url_for('diff_runs', ticket_id=ticket_id) }}">Run vs Run diff</a>
+  {% else %}
+  <a href="{{ url_for('workspace_diff', ticket_id=ticket_id) }}">Workspace vs Last Run diff</a>
+  {% endif %}
+</div>
+{% endblock %}

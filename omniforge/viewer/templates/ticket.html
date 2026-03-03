@@ -1,0 +1,155 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="row">
+  <div class="card" style="flex:1;">
+    <h3>Ticket <code>{{ ticket_id }}</code></h3>
+    <div><b>Project:</b> {{ ticket.project }}</div>
+    <div><b>Status:</b> <span class="pill">{{ ticket.status }}</span></div>
+    <div><b>Stage:</b> {{ ticket.stage }}</div>
+    <div><b>Last Passed:</b> {{ ticket.last_passed_stage or "-" }}</div>
+    <div><b>Run:</b> <span class="muted">{{ ticket.run_dir }}</span></div>
+
+    <hr style="margin:12px 0;">
+
+    <h3>Run Pipeline</h3>
+    <form method="post" action="{{ url_for('run_ticket', ticket_id=ticket_id) }}">
+      <label><input type="checkbox" name="auto" checked> --auto (skip gate approvals)</label>
+      <br><br>
+      <label>Force Stage <span class="muted">(optional)</span></label><br>
+      <input name="force_stage" placeholder="implement / test / ..." style="width:200px; padding:6px;">
+      <br><br>
+      <button class="btn" type="submit">Run</button>
+      <div class="muted" style="margin-top:8px;">Spawns <code>forge.py run</code> in background.</div>
+    </form>
+
+    <hr style="margin:12px 0;">
+
+    <h3>Approve Gate</h3>
+    <form method="post" action="{{ url_for('approve', ticket_id=ticket_id) }}">
+      <label>Stage</label><br>
+      <input name="stage" placeholder="design / test / deliver" style="width:260px; padding:6px;">
+      <br><br>
+      <label>By</label><br>
+      <input name="by" value="Chris" style="width:260px; padding:6px;">
+      <br><br>
+      <button class="btn" type="submit">Approve</button>
+      <div class="muted" style="margin-top:8px;">This just updates <code>board.json</code> approvals.</div>
+    </form>
+  </div>
+
+  <div class="card" style="flex:1;">
+    <h3>History</h3>
+    {% if not ticket.history %}
+      <div class="muted">No history yet.</div>
+    {% else %}
+      <ul>
+      {% for e in ticket.history %}
+        <li><code>{{ e.event }}</code>
+          {% if e.stage %} — <b>{{ e.stage }}</b>{% endif %}
+          {% if e.timestamp %} <span class="muted">({{ e.timestamp }})</span>{% endif %}
+          {% if e.reason %}<div class="muted">{{ e.reason }}</div>{% endif %}
+        </li>
+      {% endfor %}
+      </ul>
+    {% endif %}
+
+    <hr style="margin:12px 0;">
+
+    <h3>Playbooks <span class="muted">(reference)</span></h3>
+    <ul>
+      {% for name, path in playbooks.items() %}
+        <li><a href="{{ url_for('playbook', name=name) }}" target="_blank">{{ name }}</a></li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+
+<hr style="margin:16px 0;">
+
+<!-- Workspace Editor -->
+<div class="card" style="margin-bottom:16px;">
+  <h3>Workspace <span class="muted">(editable stage documents)</span></h3>
+  <p class="muted" style="margin:0 0 12px 0;">
+    Edit these before running. They'll be snapshotted into the run folder as evidence.
+  </p>
+
+  <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+    {% for stage in stage_files.keys() %}
+      <button class="btn workspace-tab {% if loop.first %}active{% endif %}"
+              onclick="showWorkspace('{{ stage }}')"
+              id="tab-{{ stage }}">
+        {{ stage|capitalize }}
+        {% if workspace[stage] %}<span style="color:green;">●</span>{% endif %}
+      </button>
+    {% endfor %}
+  </div>
+
+  {% for stage, filename in stage_files.items() %}
+    <div class="workspace-panel" id="workspace-{{ stage }}" style="{% if not loop.first %}display:none;{% endif %}">
+      <form method="post" action="{{ url_for('save_workspace', ticket_id=ticket_id) }}">
+        <input type="hidden" name="stage" value="{{ stage }}">
+        <textarea name="content" 
+                  style="width:100%; height:250px; font-family:monospace; padding:10px; border:1px solid #ccc; border-radius:6px;"
+                  placeholder="# {{ stage|capitalize }}&#10;&#10;Enter your {{ stage }} document here...">{{ workspace[stage] }}</textarea>
+        <div style="margin-top:8px; display:flex; justify-content:space-between; align-items:center;">
+          <span class="muted">Saves to: <code>runs/work/{{ ticket_id }}/{{ filename }}</code></span>
+          <button class="btn" type="submit">Save {{ stage|capitalize }}</button>
+        </div>
+      </form>
+    </div>
+  {% endfor %}
+</div>
+
+<style>
+  .workspace-tab.active { background:#e0e0e0; font-weight:bold; }
+</style>
+
+<script>
+function showWorkspace(stage) {
+  // Hide all panels
+  document.querySelectorAll('.workspace-panel').forEach(p => p.style.display = 'none');
+  // Show selected
+  document.getElementById('workspace-' + stage).style.display = 'block';
+  // Update tab styles
+  document.querySelectorAll('.workspace-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + stage).classList.add('active');
+}
+</script>
+
+<hr style="margin:16px 0;">
+
+<div class="row">
+  <div style="flex:1;">
+    <h3>Runs</h3>
+    {% if not runs %}
+      <div class="muted">No run folders found under <code>runs/{{ ticket_id }}</code></div>
+    {% else %}
+    <table>
+      <thead>
+        <tr><th>Run Timestamp</th><th>Report</th><th>Stages</th></tr>
+      </thead>
+      <tbody>
+      {% for ts, r in runs.items() %}
+        <tr>
+          <td><a href="{{ url_for('run_detail', ticket_id=ticket_id, run_ts=ts) }}"><code>{{ ts }}</code></a></td>
+          <td>{{ "yes" if r.has_report else "no" }}</td>
+          <td class="muted">
+            {% for sname, sval in r.stages.items() %}
+              <code>{{ sname }}</code>
+            {% endfor %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+
+  {% if runs|length >= 2 %}
+  <div class="card" style="flex:0 0 280px;">
+    <h3>Compare Runs</h3>
+    <a href="{{ url_for('diff_runs', ticket_id=ticket_id) }}" class="btn">Open Diff View</a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

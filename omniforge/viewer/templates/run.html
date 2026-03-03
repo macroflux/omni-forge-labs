@@ -1,0 +1,90 @@
+{% extends "layout.html" %}
+{% block content %}
+<h2 style="margin:0 0 10px 0;">Run <code>{{ ticket_id }}</code> / <code>{{ run_ts }}</code></h2>
+
+<div class="grid">
+  <div class="card">
+    <h3>Run Report</h3>
+    {% if report %}
+      <pre>{{ report }}</pre>
+    {% else %}
+      <div class="muted">No run_report.md found.</div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h3>Stages</h3>
+    <ul>
+      {% for s in stages %}
+        <li>
+          <b>{{ s.stage }}</b>
+          {% if s.has_log %}
+            — <a href="{{ url_for('stage_log', ticket_id=ticket_id, run_ts=run_ts, stage=s.stage) }}">log</a>
+            | <a href="#" onclick="startTail('{{ s.stage }}'); return false;">live tail</a>
+          {% endif %}
+          {% if s.artifacts %}
+            <div class="muted">
+              Artifacts:
+              {% for a in s.artifacts %}
+                <a href="{{ url_for('stage_artifact', ticket_id=ticket_id, run_ts=run_ts, stage=s.stage, name=a) }}"><code>{{ a }}</code></a>
+              {% endfor %}
+            </div>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+
+<hr style="margin:16px 0;">
+
+<div class="card" id="tailCard" style="display:none;">
+  <div style="display:flex; justify-content:space-between; align-items:center;">
+    <h3 id="tailHeader">Live Tail</h3>
+    <button class="btn" onclick="stopTail()">Stop</button>
+  </div>
+  <pre id="tailOutput" style="max-height:400px; overflow:auto;"></pre>
+</div>
+
+<script>
+let tailInterval = null;
+let currentStage = null;
+
+function startTail(stage) {
+  stopTail();
+  currentStage = stage;
+  document.getElementById('tailCard').style.display = 'block';
+  document.getElementById('tailHeader').textContent = 'Live Tail: ' + stage;
+  document.getElementById('tailOutput').textContent = 'Loading...';
+  
+  function fetchTail() {
+    fetch('/api/ticket/{{ ticket_id }}/run/{{ run_ts }}/stage/' + stage + '/tail?tail=80')
+      .then(r => r.json())
+      .then(data => {
+        if (data.missing) {
+          document.getElementById('tailOutput').textContent = '(log not found)';
+        } else {
+          document.getElementById('tailOutput').textContent = data.lines.join('\n');
+          // Auto-scroll to bottom
+          const el = document.getElementById('tailOutput');
+          el.scrollTop = el.scrollHeight;
+        }
+      })
+      .catch(err => {
+        document.getElementById('tailOutput').textContent = 'Error: ' + err;
+      });
+  }
+  
+  fetchTail();
+  tailInterval = setInterval(fetchTail, 2000);
+}
+
+function stopTail() {
+  if (tailInterval) {
+    clearInterval(tailInterval);
+    tailInterval = null;
+  }
+  document.getElementById('tailCard').style.display = 'none';
+}
+</script>
+{% endblock %}
