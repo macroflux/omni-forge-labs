@@ -22,6 +22,7 @@ coverage.xml
 
 # Run artefacts (logs, boards, bundles) — keep the directory but not its contents
 runs/*.json
+runs/*.log
 runs/*/
 
 # Editor / OS

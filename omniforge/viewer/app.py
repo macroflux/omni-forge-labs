@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import difflib
+import json
 import os
 import re
 import subprocess
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from flask import Flask, abort, jsonify, redirect, render_template, request, url_for
+from markupsafe import escape as html_escape
 
 # Reuse your board adapter (JSON)
 # This file assumes you're running from repo root and PYTHONPATH includes omniforge/runner
@@ -37,6 +39,9 @@ PLAYBOOKS = {
     "rollback_rules": "omniforge/playbooks/rollback_rules.md",
     "company_charter": "omniforge/charter/company_charter.md",
 }
+
+WORKER_LOG = RUNS_DIR / "worker.log"
+WORKER_STATE = RUNS_DIR / "worker.state.json"
 
 SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9_\-\.]+$")
 
@@ -246,7 +251,7 @@ def stage_log(ticket_id: str, run_ts: str, stage: str):
     tail = int(request.args.get("tail", "400"))
     lines = content.splitlines()
     content = "\n".join(lines[-tail:]) if tail > 0 else content
-    return f"<pre style='white-space:pre-wrap'>{content}</pre>"
+    return f"<pre style='white-space:pre-wrap'>{html_escape(content)}</pre>"
 
 
 @app.get("/ticket/<ticket_id>/run/<run_ts>/stage/<stage>/artifact/<name>")
@@ -259,7 +264,7 @@ def stage_artifact(ticket_id: str, run_ts: str, stage: str, name: str):
         abort(404)
 
     content = _read_text(p)
-    return f"<pre style='white-space:pre-wrap'>{content}</pre>"
+    return f"<pre style='white-space:pre-wrap'>{html_escape(content)}</pre>"
 
 
 @app.post("/ticket/<ticket_id>/approve")
@@ -546,6 +551,94 @@ def diff_runs(ticket_id: str):
 @app.get("/api/projects")
 def api_projects():
     return jsonify({"projects": _list_projects()})
+
+
+# ---------------------------------------------------------------------------
+# Worker: helpers
+# ---------------------------------------------------------------------------
+
+def _read_worker_state() -> Dict[str, Any]:
+    """Return the contents of runs/worker.state.json, or a default dict."""
+    try:
+        return json.loads(WORKER_STATE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"running": False}
+
+
+def _worker_is_alive(pid: Optional[int]) -> bool:
+    """Return True if *pid* corresponds to a live process."""
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (ProcessLookupError, PermissionError, OSError):
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Worker: API status endpoint
+# ---------------------------------------------------------------------------
+
+@app.get("/api/worker/status")
+def api_worker_status():
+    state = _read_worker_state()
+    running = state.get("running", False)
+    pid = state.get("pid")
+    # Reconcile state file with OS reality
+    if running and not _worker_is_alive(pid):
+        running = False
+    return jsonify({"ok": True, "worker": {**state, "running": running}})
+
+
+# ---------------------------------------------------------------------------
+# Worker: start / stop
+# ---------------------------------------------------------------------------
+
+@app.post("/worker/start")
+def worker_start():
+    state = _read_worker_state()
+    if state.get("running") and _worker_is_alive(state.get("pid")):
+        # Already running — nothing to do
+        return redirect(url_for("index"))
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(REPO_ROOT / "omniforge" / "runner")
+
+    subprocess.Popen(
+        [_repo_python(), str(REPO_ROOT / "omniforge" / "viewer" / "worker.py")],
+        cwd=str(REPO_ROOT),
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+    )
+
+    return redirect(url_for("index"))
+
+
+@app.post("/worker/stop")
+def worker_stop():
+    state = _read_worker_state()
+    state["running"] = False
+    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    WORKER_STATE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    return redirect(url_for("index"))
+
+
+# ---------------------------------------------------------------------------
+# Worker: log viewer
+# ---------------------------------------------------------------------------
+
+@app.get("/worker/log")
+def worker_log_view():
+    if not WORKER_LOG.exists():
+        return "<pre>No worker log yet.</pre>"
+    content = _read_text(WORKER_LOG)
+    tail = int(request.args.get("tail", "400"))
+    lines = content.splitlines()
+    content = "\n".join(lines[-tail:]) if tail > 0 else content
+    return f"<pre style='white-space:pre-wrap'>{html_escape(content)}</pre>"
 
 
 if __name__ == "__main__":

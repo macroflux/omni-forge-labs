@@ -15,6 +15,20 @@
       <button class="btn" type="submit">Create</button>
     </form>
   </div>
+
+  <div class="card" style="flex:0 0 auto; min-width:220px;">
+    <h3>Worker Loop</h3>
+    <div id="workerStatus" class="muted" style="margin-bottom:10px;">Loading…</div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <form method="post" action="{{ url_for('worker_start') }}">
+        <button class="btn" type="submit">▶ Start</button>
+      </form>
+      <form method="post" action="{{ url_for('worker_stop') }}">
+        <button class="btn" type="submit">⏹ Stop</button>
+      </form>
+      <a href="{{ url_for('worker_log_view') }}" class="btn">📋 Log</a>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -24,6 +38,37 @@ fetch('/api/projects')
     const sel = document.getElementById('projectSelect');
     sel.innerHTML = data.projects.map(p => `<option value="${p}">${p}</option>`).join('');
   });
+
+function refreshWorkerStatus() {
+  fetch('/api/worker/status')
+    .then(r => r.json())
+    .then(data => {
+      const w = data.worker;
+      const el = document.getElementById('workerStatus');
+      el.innerHTML = '';
+      const badge = document.createElement('span');
+      badge.className = 'pill';
+      if (w.running) {
+        badge.style.background = '#d4edda';
+        badge.textContent = '🟢 Running';
+        el.appendChild(badge);
+        if (w.started_at) {
+          const since = document.createElement('span');
+          since.className = 'muted';
+          since.textContent = ' since ' + w.started_at;
+          el.appendChild(since);
+        }
+      } else {
+        badge.textContent = '🔴 Stopped';
+        el.appendChild(badge);
+      }
+    })
+    .catch(() => {
+      document.getElementById('workerStatus').textContent = 'Status unavailable';
+    });
+}
+refreshWorkerStatus();
+setInterval(refreshWorkerStatus, 5000);
 </script>
 
 <h2 style="margin:0 0 8px 0;">Tickets</h2>
