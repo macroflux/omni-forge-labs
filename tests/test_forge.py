@@ -27,7 +27,7 @@ from adapters.local_board import LocalBoard  # noqa: E402
 def _stage_cmd(stage: str) -> str:
     """Single-line shell command that echoes and writes the required artifact."""
     artifact = forge.STAGE_ARTIFACTS.get(stage, f"{stage}.md")
-    return f'echo "{stage} ok" && echo "# {stage}" > "$FORGE_STAGE_DIR/{artifact}"'
+    return f'"{sys.executable}" -c "import os,pathlib; print(\'{stage} ok\'); pathlib.Path(os.environ[\'FORGE_STAGE_DIR\'], \'{artifact}\').write_text(\'# {stage}\')"'
 
 
 def _make_manifest(
@@ -165,7 +165,7 @@ class TestRunCommand:
     def test_extra_env_is_visible_to_command(self, tmp_path):
         log = str(tmp_path / "test.log")
         rc = forge.run_command(
-            "echo $MY_VAR",
+            f'"{sys.executable}" -c "import os; print(os.environ[\'MY_VAR\'])"' ,
             cwd=str(tmp_path),
             log_path=log,
             extra_env={"MY_VAR": "hello_from_env"},
@@ -448,7 +448,7 @@ class TestRunProject:
         assert ticket["rollback_to"] == "research"
 
     def test_preserves_approvals_across_runs(self, tmp_path, monkeypatch):
-        """Approvals set on the board survive a second run_project call."""
+        """An unbound boolean cannot bypass evidence review."""
         board = _setup_project(
             tmp_path,
             monkeypatch,
@@ -458,7 +458,7 @@ class TestRunProject:
         # Seed an approval before running.
         board.upsert_ticket("T-001", {"approvals": {"test": True}})
         result = forge.run_project("testproject", "T-001", auto=False, board=board)
-        assert result is True
+        assert result is False
 
 
 # ---------------------------------------------------------------------------
@@ -564,7 +564,7 @@ class TestApproveFlow:
         assert board.get_ticket("T-001")["status"] == "paused_at_test"
 
         # Approve via board (simulates `forge approve`).
-        board.upsert_ticket("T-001", {"approvals": {"test": True}})
+        board.approve_stage("T-001", "test")
 
         # Second run: should advance past the gate and deliver.
         result = forge.run_project("testproject", "T-001", auto=False, board=board)
@@ -575,7 +575,7 @@ class TestApproveFlow:
         """forge approve sets approvals[stage]=True and approvals_meta on the board."""
         board = LocalBoard(board_path=str(tmp_path / "board.json"))
         board.upsert_ticket(
-            "T-001", {"project": "testproject", "status": "paused_at_design"}
+            "T-001", {"project": "testproject", "status": "paused_at_design", "gate_fingerprint":"review"}
         )
         # Patch LocalBoard() constructor used inside cmd_approve.
         monkeypatch.setattr(
@@ -592,7 +592,7 @@ class TestApproveFlow:
 
     def test_cmd_approve_without_by_uses_unknown(self, tmp_path, monkeypatch):
         board = LocalBoard(board_path=str(tmp_path / "board.json"))
-        board.upsert_ticket("T-001", {"project": "testproject"})
+        board.upsert_ticket("T-001", {"project": "testproject", "status":"paused_at_design", "gate_fingerprint":"review"})
         monkeypatch.setattr(
             "adapters.local_board.LocalBoard", lambda board_path=None: board
         )
@@ -607,7 +607,7 @@ class TestApproveFlow:
 
     def test_approve_appends_history_event(self, tmp_path, monkeypatch):
         board = LocalBoard(board_path=str(tmp_path / "board.json"))
-        board.upsert_ticket("T-001", {"project": "testproject"})
+        board.upsert_ticket("T-001", {"project": "testproject", "status":"paused_at_design", "gate_fingerprint":"review"})
         monkeypatch.setattr(
             "adapters.local_board.LocalBoard", lambda board_path=None: board
         )

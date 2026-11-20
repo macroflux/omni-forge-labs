@@ -1,0 +1,11 @@
+pause_at: [design, test, deliver]
+rollback:
+  intake: intake
+  plan: intake
+  design: plan
+  research: design
+  implement: design
+  test: implement
+  integrate: implement
+  deliver: test
+escalation_threshold: 2

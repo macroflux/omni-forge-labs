@@ -144,26 +144,26 @@ class TestAppendEvent:
 
 class TestApproveStage:
     def test_sets_approval_flag(self, board):
-        board.upsert_ticket("T-001", {"project": "test"})
+        board.upsert_ticket("T-001", {"project":"test", "status":"paused_at_design", "gate_fingerprint":"review"})
         board.approve_stage("T-001", "design", by="Chris")
         ticket = board.get_ticket("T-001")
         assert ticket["approvals"]["design"] is True
 
     def test_records_approvals_meta(self, board):
-        board.upsert_ticket("T-001", {})
+        board.upsert_ticket("T-001", {"status":"paused_at_design", "gate_fingerprint":"review"})
         board.approve_stage("T-001", "design", by="Chris")
         meta = board.get_ticket("T-001")["approvals_meta"]["design"]
         assert meta["by"] == "Chris"
         assert "at" in meta
 
     def test_defaults_approver_to_client(self, board):
-        board.upsert_ticket("T-001", {})
-        board.approve_stage("T-001", "test")
-        meta = board.get_ticket("T-001")["approvals_meta"]["test"]
+        board.upsert_ticket("T-001", {"status":"paused_at_design", "gate_fingerprint":"review"})
+        board.approve_stage("T-001", "design")
+        meta = board.get_ticket("T-001")["approvals_meta"]["design"]
         assert meta["by"] == "client"
 
     def test_appends_approved_history_event(self, board):
-        board.upsert_ticket("T-001", {})
+        board.upsert_ticket("T-001", {"status":"paused_at_design", "gate_fingerprint":"review"})
         board.approve_stage("T-001", "design", by="Alex")
         history = board.get_ticket("T-001")["history"]
         assert any(
@@ -171,7 +171,13 @@ class TestApproveStage:
             for e in history
         )
 
-    def test_creates_ticket_if_missing(self, board):
-        ticket = board.approve_stage("T-999", "deliver", by="Sam")
-        assert ticket["approvals"]["deliver"] is True
-        assert ticket["ticket_id"] == "T-999"
+    def test_rejects_approval_of_missing_ticket(self, board):
+        with pytest.raises(ValueError):
+            board.approve_stage('T-999', 'deliver', by='Sam')
+
+    def test_approval_requeues_paused_ticket(self, board):
+        board.upsert_ticket('T-001', {'status':'paused_at_design', 'gate_fingerprint':'review'})
+        ticket = board.approve_stage('T-001', 'design')
+        assert ticket['status'] == 'pending'
+        assert ticket['resume_stage'] == 'design'
+        assert ticket['approvals_meta']['design']['fingerprint'] == 'review'

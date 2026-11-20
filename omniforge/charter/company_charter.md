@@ -1,5 +1,9 @@
 # OmniForge Labs — Company Charter
 
+> Experimental v0.1: this charter describes the intended organization. The runtime
+> executes configured commands; it does not instantiate these roles as autonomous bots.
+> GitHub Projects is an unimplemented stub. See the README for current capabilities.
+
 ## Mission
 
 OmniForge Labs exists to build and deliver small-to-medium software projects autonomously through a coordinated team of AI-powered role bots, structured workflows, local test execution, and defined review gates.  The goal is repeatable, traceable delivery — from a single sentence of intent to a working, tested, deployable artifact — with a client-first delivery mindset and a high-IQ skunkworks culture.

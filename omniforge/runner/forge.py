@@ -14,6 +14,10 @@ Usage examples::
 from __future__ import annotations
 
 import argparse
+import hashlib
+import uuid
+from pathlib import Path
+import re
 import datetime
 import json
 import os
@@ -331,15 +335,69 @@ def write_run_report(
 
 def _append_history(board: Any, ticket: str, event: Dict[str, Any]) -> None:
     """Append *event* to the ticket's ``history`` list on the board."""
-    existing = board.get_ticket(ticket) or {}
-    history = list(existing.get("history") or [])
-    history.append(event)
-    board.upsert_ticket(ticket, {"history": history})
+    board.append_history(ticket, event)
 
 
 # ---------------------------------------------------------------------------
 # Core run logic
 # ---------------------------------------------------------------------------
+
+
+def validate_config(manifest, gates):
+    if not isinstance(manifest, dict) or not isinstance(gates, dict):
+        raise ValueError('Manifest and gates must be mappings')
+    stages = manifest.get('stages')
+    if not isinstance(stages, dict) or not stages or set(stages) - set(SDLC_STAGES):
+        raise ValueError('Configure at least one recognized stage')
+    for stage, commands in stages.items():
+        if commands is None:
+            continue
+        if isinstance(commands, str):
+            commands = [commands]
+        if not isinstance(commands, list):
+            raise ValueError(f'Invalid commands for {stage}')
+        for command in commands:
+            if not isinstance(command, (str, dict)) or (isinstance(command, dict) and not isinstance(command.get('cmd'), str)):
+                raise ValueError(f'Invalid command for {stage}')
+            if isinstance(command, dict) and not isinstance(command.get('cwd', ''), str):
+                raise ValueError('Command cwd must be a string')
+    if manifest.get('repo_root') is not None and not isinstance(manifest['repo_root'], str):
+        raise ValueError('repo_root must be a string')
+    assertions = manifest.get('asserts') or {}
+    if not isinstance(assertions, dict) or set(assertions) - set(SDLC_STAGES):
+        raise ValueError('asserts must map recognized stages to lists')
+    for entries in assertions.values():
+        if not isinstance(entries, list) or any(not isinstance(a, dict) or a.get('type') not in ('file_exists','json_has_keys','json_array_min_length') or not isinstance(a.get('path'), str) for a in entries):
+            raise ValueError('Invalid assertion configuration')
+    pause = gates.get('pause_at') or []
+    rollback = gates.get('rollback') or {}
+    if not isinstance(pause, list) or set(pause) - set(SDLC_STAGES):
+        raise ValueError('Unknown gate stage')
+    if not isinstance(rollback, dict) or set(rollback) - set(SDLC_STAGES) or set(rollback.values()) - set(SDLC_STAGES):
+        raise ValueError('Unknown rollback stage')
+    threshold = gates.get('escalation_threshold', 2)
+    if type(threshold) is not int or threshold < 1:
+        raise ValueError('escalation_threshold must be a positive integer')
+
+
+def workspace_fingerprint(ticket):
+    digest = hashlib.sha256()
+    folder = Path(_WORK_DIR) / ticket
+    if folder.is_dir():
+        for path in sorted(folder.glob('*.md')):
+            digest.update(path.name.encode()); digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def gate_fingerprint(manifest, gates, ticket, run_dir, stage):
+    digest = hashlib.sha256(json.dumps([manifest, gates], sort_keys=True).encode())
+    # Bind approval to configuration, editable inputs, and prior-stage Markdown evidence.
+    for folder in [Path(_WORK_DIR) / ticket, *[Path(run_dir) / s for s in SDLC_STAGES[:SDLC_STAGES.index(stage)+1]]]:
+        if folder.is_dir():
+            for path in sorted(folder.glob('*.md')):
+                digest.update((folder.name + '/' + path.name).encode())
+                digest.update(path.read_bytes())
+    return digest.hexdigest()
 
 
 def run_project(
@@ -376,14 +434,39 @@ def run_project(
 
         board = LocalBoard()
 
+    if not all(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}', x) for x in (project, ticket)):
+        raise ValueError('Project and ticket must start with a letter/digit and contain only letters, digits, _ or -')
     manifest = load_manifest(project)
     gates = load_gates(project)
-
-    timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+    validate_config(manifest, gates)
+    if force_stage and force_stage not in SDLC_STAGES:
+        print(f'Unknown stage: {force_stage}')
+        return False
+    previous = board.get_ticket(ticket) or {}
+    if previous.get('status') == 'running':
+        raise ValueError('Ticket already running')
+    if previous.get('project') not in (None, project):
+        raise ValueError('Ticket belongs to another project')
+    explicit_override = bool(force_stage)
+    if not force_stage:
+        force_stage = previous.get('resume_stage') or previous.get('rollback_to')
+        if previous.get('workspace_fingerprint') not in (None, workspace_fingerprint(ticket)):
+            force_stage = None
+            board.upsert_ticket(ticket, {'approvals':{}, 'approvals_meta':{}})
+    if force_stage and not any(s in manifest['stages'] for s in SDLC_STAGES[SDLC_STAGES.index(force_stage):]):
+        raise ValueError('No configured stages at or after the requested resume point')
+    timestamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%f') + '-' + uuid.uuid4().hex[:6]
     run_dir = os.path.join(_RUNS_DIR, ticket, timestamp)
     os.makedirs(run_dir, exist_ok=True)
 
-    # Copy workspace docs (intake, plan, design, research) into run as starting artifacts
+    # Carry earlier evidence into a new attempt; never overwrite the prior run.
+    if force_stage and previous.get('run_dir'):
+        old_run = Path(previous['run_dir']).resolve()
+        if Path(_RUNS_DIR).resolve() not in old_run.parents:
+            raise ValueError('Previous run is outside runs directory')
+        for earlier in SDLC_STAGES[:SDLC_STAGES.index(force_stage)]:
+            if (old_run / earlier).is_dir():
+                shutil.copytree(old_run / earlier, Path(run_dir) / earlier)
     copy_workspace_to_run(ticket, run_dir)
 
     # Resolve working directory for commands.
@@ -399,25 +482,26 @@ def run_project(
 
     # Preserve approvals / history across runs (for resume after pause/rollback).
     existing_ticket = board.get_ticket(ticket) or {}
-    board.upsert_ticket(
+    board.claim_run(
         ticket,
         {
             "project": project,
             "status": "running",
+            "owner_pid": os.getpid(),
             "stage": None,
             "run_dir": run_dir,
             "started_at": timestamp,
             "approvals": existing_ticket.get("approvals") or {},
             "approvals_meta": existing_ticket.get("approvals_meta") or {},
             "rollback_counts": existing_ticket.get("rollback_counts") or {},
-            "history": existing_ticket.get("history") or [],
+            "workspace_fingerprint": workspace_fingerprint(ticket),
         },
     )
-    _append_history(
-        board,
-        ticket,
-        {"event": "run_started", "timestamp": timestamp, "project": project},
-    )
+    _append_history(board, ticket, {'event':'run_started', 'timestamp':timestamp})
+    if explicit_override:
+        _append_history(board, ticket, {'event':'force_override', 'stage':force_stage, 'timestamp':timestamp})
+    if auto:
+        _append_history(board, ticket, {'event':'auto_override', 'timestamp':timestamp})
 
     stage_commands: Dict[str, Any] = manifest.get("stages") or {}
     stage_asserts: Dict[str, Any] = manifest.get("asserts") or {}
@@ -484,9 +568,13 @@ def run_project(
         # ── Gate check ────────────────────────────────────────────────────
         if stage in pause_at and not auto:
             existing_now = board.get_ticket(ticket) or {}
-            approvals = existing_now.get("approvals") or {}
-            if not approvals.get(stage):
-                board.upsert_ticket(ticket, {"status": f"paused_at_{stage}"})
+            approvals = existing_now.get('approvals') or {}
+            fingerprint = gate_fingerprint(manifest, gates, ticket, run_dir, stage)
+            approved_fingerprint = (existing_now.get('approvals_meta') or {}).get(stage, {}).get('fingerprint')
+            if not approvals.get(stage) or approved_fingerprint != fingerprint:
+                board.upsert_ticket(ticket, {'status': f'paused_at_{stage}',
+                    'resume_stage':stage, 'gate_fingerprint':fingerprint,
+                    'approvals':{}, 'approvals_meta':{}})
                 _append_history(
                     board,
                     ticket,
@@ -518,6 +606,9 @@ def run_project(
                 )
                 return False
 
+        # Approval authorizes one gate execution, not future revisions.
+        if stage in pause_at:
+            board.upsert_ticket(ticket, {'approvals':{}, 'approvals_meta':{}, 'gate_fingerprint':None})
         stages_run.append(stage)
         print(f"\n▶  Stage: {stage}")
         failed = False
@@ -527,7 +618,7 @@ def run_project(
         for cmd_entry in cmds:
             print(f"   $ {cmd_entry['cmd']}")
             rc = run_command(
-                cmd_entry["cmd"],
+                cmd_entry["cmd"].replace("{python}", sys.executable),
                 cmd_entry["cwd"],
                 stage_log,
                 extra_env=env_extras,
@@ -587,6 +678,8 @@ def run_project(
                 {
                     "status": f"failed_at_{stage}",
                     "rollback_to": effective_rollback,
+                    "resume_stage": effective_rollback,
+                    "approvals": {}, "approvals_meta": {},
                     "rollback_counts": rollback_counts,
                     "last_log": stage_log,
                 },
@@ -635,7 +728,8 @@ def run_project(
             },
         )
 
-    board.upsert_ticket(ticket, {"status": "delivered", "delivered_at": timestamp})
+    board.upsert_ticket(ticket, {'status':'delivered', 'delivered_at':timestamp,
+        'resume_stage':None, 'rollback_to':None, 'approvals':{}, 'approvals_meta':{}})
     _append_history(board, ticket, {"event": "delivered", "timestamp": timestamp})
     write_run_report(run_dir, ticket, project, timestamp, stages_run, stage_results)
     print(f"\n✅  Ticket {ticket} delivered.  Run report: {run_dir}/run_report.md")
@@ -650,12 +744,17 @@ def run_project(
 def cmd_run(args: argparse.Namespace) -> None:
     """Handle the ``forge run`` sub-command."""
     sys.path.insert(0, _RUNNER_DIR)
-    run_project(
+    result = run_project(
         project=args.project,
         ticket=args.ticket,
         auto=args.auto,
-        force_stage=getattr(args, "force_stage", None),
+        force_stage=getattr(args, 'force_stage', None),
     )
+    if not result:
+        from adapters.local_board import LocalBoard
+        state = LocalBoard().get_ticket(args.ticket) or {}
+        if not state.get('status', '').startswith('paused_at_'):
+            raise SystemExit(1)
 
 
 def cmd_approve(args: argparse.Namespace) -> None:
@@ -757,9 +856,24 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='replace')
     parser = build_parser()
     args = parser.parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    except (ValueError, OSError, yaml.YAMLError, TypeError, KeyError) as exc:
+        print(f'Forge error: {exc}', file=sys.stderr)
+        if args.command == 'run':
+            from adapters.local_board import LocalBoard
+            # Only repair a run claimed by this process.
+            if getattr(args, 'ticket', None) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}', args.ticket):
+                board = LocalBoard()
+                state = board.get_ticket(args.ticket) or {}
+                if state.get('status') != 'running' or state.get('owner_pid') == os.getpid():
+                    board.upsert_ticket(args.ticket, {'status':'held', 'error':str(exc)})
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

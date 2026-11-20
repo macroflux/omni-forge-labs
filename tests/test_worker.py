@@ -54,7 +54,7 @@ class TestIsRunnable:
     def test_failed_at_without_rollback_is_runnable(self):
         # failed_at_* with no rollback_to is still considered runnable;
         # forge itself will handle the missing flag gracefully
-        assert _is_runnable(self._t("failed_at_integrate")) is True
+        assert _is_runnable(self._t("failed_at_integrate")) is False
 
     def test_running_is_not_runnable(self):
         assert _is_runnable(self._t("running")) is False
@@ -137,9 +137,7 @@ class TestForgeCmd:
 
     def test_force_stage_for_failed_with_rollback(self):
         cmd = _forge_cmd(self._ticket(status="failed_at_test", rollback_to="implement"))
-        assert "--force-stage" in cmd
-        idx = cmd.index("--force-stage")
-        assert cmd[idx + 1] == "implement"
+        assert '--force-stage' not in cmd  # Runner resolves normal rollback state.
 
     def test_no_force_stage_for_failed_without_rollback(self):
         cmd = _forge_cmd(self._ticket(status="failed_at_test"))

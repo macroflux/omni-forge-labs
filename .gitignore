@@ -31,3 +31,5 @@ runs/*/
 .vscode/
 *.swp
 *.swo
+
+runs/*.lock

@@ -13,7 +13,8 @@
 
     <h3>Run Pipeline</h3>
     <form method="post" action="{{ url_for('run_ticket', ticket_id=ticket_id) }}">
-      <label><input type="checkbox" name="auto" checked> --auto (skip gate approvals)</label>
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label><input type="checkbox" name="auto"> --auto (skip gate approvals)</label>
       <br><br>
       <label>Force Stage <span class="muted">(optional)</span></label><br>
       <input name="force_stage" placeholder="implement / test / ..." style="width:200px; padding:6px;">
@@ -26,6 +27,7 @@
 
     <h3>Approve Gate</h3>
     <form method="post" action="{{ url_for('approve', ticket_id=ticket_id) }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label>Stage</label><br>
       <input name="stage" placeholder="design / test / deliver" style="width:260px; padding:6px;">
       <br><br>
@@ -44,10 +46,11 @@
     {% else %}
       <ul>
       {% for e in ticket.history %}
-        <li><code>{{ e.event }}</code>
+        <li><code>{{ e.event or e.type }}</code>
           {% if e.stage %} — <b>{{ e.stage }}</b>{% endif %}
-          {% if e.timestamp %} <span class="muted">({{ e.timestamp }})</span>{% endif %}
+          {% if e.timestamp or e.at %} <span class="muted">({{ e.timestamp or e.at }})</span>{% endif %}
           {% if e.reason %}<div class="muted">{{ e.reason }}</div>{% endif %}
+          {% if e.payload %}<div class="muted">{{ e.payload }}</div>{% endif %}
         </li>
       {% endfor %}
       </ul>
@@ -87,6 +90,7 @@
   {% for stage, filename in stage_files.items() %}
     <div class="workspace-panel" id="workspace-{{ stage }}" style="{% if not loop.first %}display:none;{% endif %}">
       <form method="post" action="{{ url_for('save_workspace', ticket_id=ticket_id) }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="stage" value="{{ stage }}">
         <textarea name="content" 
                   style="width:100%; height:250px; font-family:monospace; padding:10px; border:1px solid #ccc; border-radius:6px;"
