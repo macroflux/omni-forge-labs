@@ -1,0 +1,12 @@
+name: demo
+description: Self-contained Python pipeline with evidence and a delivery bundle
+repo_root: ../..
+stages:
+  intake: '"{python}" -m omniforge.examples.demo intake'
+  plan: '"{python}" -m omniforge.examples.demo plan'
+  design: '"{python}" -m omniforge.examples.demo design'
+  research: '"{python}" -m omniforge.examples.demo research'
+  implement: '"{python}" -m omniforge.examples.demo implement'
+  test: '"{python}" -m omniforge.examples.demo test'
+  integrate: '"{python}" -m omniforge.examples.demo integrate'
+  deliver: '"{python}" -m omniforge.examples.demo deliver'

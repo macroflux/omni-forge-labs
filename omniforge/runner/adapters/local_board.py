@@ -7,6 +7,10 @@ directory.  This is the MVP tracker — no external service required.
 from __future__ import annotations
 
 import json
+import tempfile
+import time
+import threading
+from functools import wraps
 import os
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -22,6 +26,44 @@ _DEFAULT_BOARD_PATH = os.path.join(
 )
 
 
+def locked(method):
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self._thread_lock:
+            if self._lock_depth:
+                return method(self, *args, **kwargs)
+            with open(self.board_path + '.lock', 'a+b') as lock:
+                lock.seek(0, os.SEEK_END)
+                if lock.tell() == 0:
+                    lock.write(b'0'); lock.flush()
+                deadline = time.monotonic() + 15
+                while True:
+                    try:
+                        lock.seek(0)
+                        if os.name == 'nt':
+                            import msvcrt
+                            msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                        else:
+                            import fcntl
+                            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except OSError:
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError('Board is busy')
+                        time.sleep(.02)
+                self._lock_depth = 1
+                try:
+                    return method(self, *args, **kwargs)
+                finally:
+                    self._lock_depth = 0
+                    lock.seek(0)
+                    if os.name == 'nt':
+                        msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+                    else:
+                        fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    return wrapped
+
+
 class LocalBoard:
     """Simple JSON-backed ticket board.
 
@@ -33,6 +75,8 @@ class LocalBoard:
     """
 
     def __init__(self, board_path: Optional[str] = None) -> None:
+        self._thread_lock = threading.RLock()
+        self._lock_depth = 0
         self.board_path = os.path.abspath(board_path or _DEFAULT_BOARD_PATH)
         os.makedirs(os.path.dirname(self.board_path), exist_ok=True)
 
@@ -47,9 +91,15 @@ class LocalBoard:
             return json.load(fh)
 
     def _save(self, data: Dict[str, Any]) -> None:
-        with open(self.board_path, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2)
-            fh.write("\n")
+        fd, path = tempfile.mkstemp(dir=os.path.dirname(self.board_path), suffix='.tmp')
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as fh:
+                json.dump(data, fh, indent=2)
+                fh.write('\n'); fh.flush(); os.fsync(fh.fileno())
+            os.replace(path, self.board_path)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
 
     @staticmethod
     def _ensure_ticket_defaults(ticket: Dict[str, Any], ticket_id: str) -> Dict[str, Any]:
@@ -68,6 +118,7 @@ class LocalBoard:
     # Public API
     # ------------------------------------------------------------------
 
+    @locked
     def upsert_ticket(self, ticket_id: str, fields: Dict[str, Any]) -> Dict[str, Any]:
         """Create or update a ticket with the given fields.
 
@@ -92,14 +143,17 @@ class LocalBoard:
         self._save(data)
         return ticket
 
+    @locked
     def get_ticket(self, ticket_id: str) -> Optional[Dict[str, Any]]:
         """Return the ticket record, or *None* if not found."""
         return self._load().get(ticket_id)
 
+    @locked
     def list_tickets(self) -> Dict[str, Any]:
         """Return the full board as a dictionary keyed by ticket ID."""
         return self._load()
 
+    @locked
     def delete_ticket(self, ticket_id: str) -> bool:
         """Remove a ticket from the board.
 
@@ -115,6 +169,7 @@ class LocalBoard:
         self._save(data)
         return True
 
+    @locked
     def append_event(
         self,
         ticket_id: str,
@@ -150,6 +205,7 @@ class LocalBoard:
         self._save(data)
         return ticket
 
+    @locked
     def approve_stage(
         self,
         ticket_id: str,
@@ -180,8 +236,24 @@ class LocalBoard:
         if ticket_id not in data:
             data[ticket_id] = {}
         ticket = self._ensure_ticket_defaults(data[ticket_id], ticket_id)
-        ticket["approvals"][stage] = True
-        ticket["approvals_meta"][stage] = {"by": approver, "at": _now_iso()}
+        if ticket['status'] != f'paused_at_{stage}' or not ticket.get('gate_fingerprint'):
+            raise ValueError('Run the ticket and approve only its currently paused gate')
+        ticket['approvals'][stage] = True
+        ticket['approvals_meta'][stage] = {'by': approver, 'at': _now_iso(),
+                                            'fingerprint': ticket['gate_fingerprint']}
+        ticket.update(status='pending', resume_stage=stage)
         data[ticket_id] = ticket
         self._save(data)
-        return self.append_event(ticket_id, "approved", {"stage": stage, "by": approver})
+        return self.append_event(ticket_id, 'approved', {'stage':stage, 'by':approver, 'fingerprint':ticket['gate_fingerprint']})
+
+    @locked
+    def claim_run(self, ticket_id, fields):
+        ticket = self.get_ticket(ticket_id) or {}
+        if ticket.get('status') == 'running':
+            raise ValueError('Ticket already running')
+        return self.upsert_ticket(ticket_id, fields)
+
+    @locked
+    def append_history(self, ticket_id, event):
+        ticket = self.get_ticket(ticket_id) or {}
+        return self.upsert_ticket(ticket_id, {'history': [*ticket.get('history', []), event]})

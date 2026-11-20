@@ -5,6 +5,8 @@ description: "Weather/news digest web page (PHP, no Composer)"
 # repo_root is a path relative to omniforge/runner/forge.py.
 # "../.." resolves to the repository root when forge.py is invoked from
 # its own directory (omniforge/runner/).
+# Optional external integration: requires your own omni-feed checkout and PHP.
+# Use project demo for the self-contained quick start.
 repo_root: "C:/dev/omni-feed"
 
 # Commands executed by the runner at each SDLC stage.

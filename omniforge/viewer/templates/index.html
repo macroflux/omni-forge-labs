@@ -4,6 +4,7 @@
   <div class="card" style="flex:0 0 auto;">
     <h3>Create Ticket</h3>
     <form method="post" action="{{ url_for('create_ticket') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label>Project</label><br>
       <select name="project" id="projectSelect" style="width:200px; padding:6px;">
         <option value="">Loading...</option>
@@ -21,9 +22,11 @@
     <div id="workerStatus" class="muted" style="margin-bottom:10px;">Loading…</div>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
       <form method="post" action="{{ url_for('worker_start') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button class="btn" type="submit">▶ Start</button>
       </form>
       <form method="post" action="{{ url_for('worker_stop') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button class="btn" type="submit">⏹ Stop</button>
       </form>
       <a href="{{ url_for('worker_log_view') }}" class="btn">📋 Log</a>

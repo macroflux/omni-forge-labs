@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
 RUNS_DIR = REPO_ROOT / "runs"
 BOARD_PATH = RUNS_DIR / "board.json"
 WORKER_LOG = RUNS_DIR / "worker.log"
@@ -81,7 +82,8 @@ def _write_state(state: Dict[str, Any]) -> None:
 
 def _read_board() -> Dict[str, Any]:
     try:
-        return json.loads(BOARD_PATH.read_text(encoding="utf-8"))
+        from omniforge.runner.adapters.local_board import LocalBoard
+        return LocalBoard(str(BOARD_PATH)).list_tickets()
     except Exception:
         return {}
 
@@ -109,7 +111,9 @@ def _is_runnable(ticket: Dict[str, Any]) -> bool:
         return False
     if status == "delivered":
         return False
-    return True
+    if status in ('created', 'pending'):
+        return True
+    return status.startswith('failed_at_') and bool(ticket.get('rollback_to')) and sum(ticket.get('rollback_counts', {}).values()) < 3
 
 
 def _next_ticket(board: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -142,11 +146,7 @@ def _forge_cmd(ticket: Dict[str, Any]) -> List[str]:
         "--ticket", ticket_id,
     ]
 
-    # Resume failed tickets from their designated rollback point
-    if status.startswith("failed_at_"):
-        rollback_to = ticket.get("rollback_to")
-        if rollback_to:
-            cmd += ["--force-stage", rollback_to]
+    # The runner resolves normal resume points and invalidates stale workspace approvals.
 
     return cmd
 
@@ -179,6 +179,7 @@ def _run_ticket(ticket: Dict[str, Any]) -> None:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding='utf-8', errors='replace',
     )
 
     for line in (proc.stdout or "").splitlines():

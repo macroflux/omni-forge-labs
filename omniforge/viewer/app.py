@@ -5,6 +5,8 @@ import difflib
 import json
 import os
 import re
+import secrets
+from urllib.parse import urlsplit
 import subprocess
 import sys
 from datetime import datetime
@@ -19,6 +21,22 @@ from markupsafe import escape as html_escape
 from omniforge.runner.adapters.local_board import LocalBoard  # type: ignore
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024
+FORM_TOKEN = secrets.token_urlsafe(32)
+
+
+@app.context_processor
+def form_security():
+    return {'csrf_token': FORM_TOKEN}
+
+
+@app.before_request
+def local_requests_only():
+    if request.remote_addr not in ('127.0.0.1', '::1') or request.host.split(':')[0] not in ('127.0.0.1', 'localhost'):
+        abort(403)
+    if request.method == 'POST' and not secrets.compare_digest(request.form.get('csrf_token', ''), FORM_TOKEN):
+        abort(403)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]  # .../omniforge/viewer -> repo root
 RUNS_DIR = REPO_ROOT / "runs"
@@ -43,11 +61,19 @@ PLAYBOOKS = {
 WORKER_LOG = RUNS_DIR / "worker.log"
 WORKER_STATE = RUNS_DIR / "worker.state.json"
 
-SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9_\-\.]+$")
+SAFE_SEGMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,119}")
 
 
 def _safe(seg: str) -> bool:
-    return bool(SAFE_SEGMENT.match(seg))
+    return seg not in (".", "..") and bool(SAFE_SEGMENT.fullmatch(seg))
+
+
+def _under(root, *segments):
+    root = root.resolve()
+    result = root.joinpath(*segments).resolve()
+    if result != root and root not in result.parents:
+        abort(400)
+    return result
 
 
 def _read_text(path: Path) -> str:
@@ -93,7 +119,7 @@ def _list_projects() -> List[str]:
 
 def _ticket_work_dir(ticket_id: str) -> Path:
     """Return the workspace directory for a ticket."""
-    return WORK_DIR / ticket_id
+    return _under(WORK_DIR, ticket_id)
 
 
 def _load_workspace(ticket_id: str) -> Dict[str, str]:
@@ -125,7 +151,7 @@ def _save_workspace_file(ticket_id: str, stage: str, content: str) -> bool:
 
 def _list_runs(ticket_id: str) -> Dict[str, Dict[str, Any]]:
     """Return dict of run_ts -> {run_dir, has_report, stages{stage: {log, artifacts[]}}}"""
-    ticket_dir = RUNS_DIR / ticket_id
+    ticket_dir = _under(RUNS_DIR, ticket_id)
     if not ticket_dir.exists():
         return {}
 
@@ -208,7 +234,7 @@ def run_detail(ticket_id: str, run_ts: str):
     if not (_safe(ticket_id) and _safe(run_ts)):
         abort(400)
 
-    run_dir = RUNS_DIR / ticket_id / run_ts
+    run_dir = _under(RUNS_DIR, ticket_id, run_ts)
     if not run_dir.exists():
         abort(404)
 
@@ -242,7 +268,7 @@ def stage_log(ticket_id: str, run_ts: str, stage: str):
     if not (_safe(ticket_id) and _safe(run_ts) and _safe(stage)):
         abort(400)
 
-    log_path = RUNS_DIR / ticket_id / run_ts / stage / "stage.log"
+    log_path = _under(RUNS_DIR, ticket_id, run_ts, stage, "stage.log")
     if not log_path.exists():
         abort(404)
 
@@ -259,7 +285,7 @@ def stage_artifact(ticket_id: str, run_ts: str, stage: str, name: str):
     if not (_safe(ticket_id) and _safe(run_ts) and _safe(stage) and _safe(name)):
         abort(400)
 
-    p = RUNS_DIR / ticket_id / run_ts / stage / name
+    p = _under(RUNS_DIR, ticket_id, run_ts, stage, name)
     if not p.exists():
         abort(404)
 
@@ -276,7 +302,10 @@ def approve(ticket_id: str):
     by = (request.form.get("by") or "").strip() or "client"
     if stage and _safe(stage):
         board = LocalBoard(board_path=str(BOARD_PATH))
-        board.approve_stage(ticket_id, stage, by=by)
+        try:
+            board.approve_stage(ticket_id, stage, by=by)
+        except ValueError as exc:
+            abort(409, str(exc))
     return redirect(url_for("ticket", ticket_id=ticket_id))
 
 
@@ -331,13 +360,13 @@ def playbook(name: str):
 @app.post("/ticket/create")
 def create_ticket():
     project = (request.form.get("project") or "").strip()
-    if not _safe(project):
+    if not _safe(project) or project not in _list_projects():
         abort(400)
 
     # Allow user to provide ticket id, otherwise generate one
     ticket_id = (request.form.get("ticket_id") or "").strip()
     if ticket_id:
-        if not _safe(ticket_id):
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}', ticket_id):
             abort(400)
     else:
         ticket_id = f"T-{_now_ts()}"
@@ -386,7 +415,7 @@ def run_ticket(ticket_id: str):
         abort(400)
     auto = request.form.get("auto") == "on"
     force_stage = (request.form.get("force_stage") or "").strip() or None
-    if force_stage and not _safe(force_stage):
+    if force_stage and force_stage not in ('intake','plan','design','research','implement','test','integrate','deliver'):
         abort(400)
 
     board = LocalBoard(board_path=str(BOARD_PATH))
@@ -403,11 +432,11 @@ def run_ticket(ticket_id: str):
     if not project:
         abort(400)
 
-    # Set status to running immediately (before spawn) to prevent race conditions
+    # The runner claims a ticket atomically; the viewer must not pre-claim it.
     existing = board.get_ticket(ticket_id) or {}
     hist = list(existing.get("history") or [])
     hist.append({"event": "run_requested", "timestamp": _now_ts(), "auto": auto, "force_stage": force_stage})
-    board.upsert_ticket(ticket_id, {"status": "running", "stage": None, "history": hist})
+    board.append_event(ticket_id, 'run_requested', {'auto':auto, 'force_stage':force_stage})
 
     # Spawn Forge as a detached process (MVP). Logs will appear in runs/.
     env = os.environ.copy()
@@ -435,7 +464,7 @@ def api_tail(ticket_id: str, run_ts: str, stage: str):
     if not (_safe(ticket_id) and _safe(run_ts) and _safe(stage)):
         abort(400)
 
-    log_path = RUNS_DIR / ticket_id / run_ts / stage / "stage.log"
+    log_path = _under(RUNS_DIR, ticket_id, run_ts, stage, "stage.log")
     if not log_path.exists():
         return jsonify({"ok": True, "lines": [], "missing": True})
 
@@ -472,13 +501,13 @@ def workspace_diff(ticket_id: str):
         )
 
     filename = STAGE_FILES[stage]
-    workspace_path = WORK_DIR / ticket_id / filename
+    workspace_path = _under(WORK_DIR, ticket_id, filename)
 
     # Find latest run with this stage artifact
     last_run_path = None
     last_run_ts = None
     for ts in run_timestamps:
-        candidate = RUNS_DIR / ticket_id / ts / stage / filename
+        candidate = _under(RUNS_DIR, ticket_id, ts, stage, filename)
         if candidate.exists():
             last_run_path = candidate
             last_run_ts = ts
@@ -532,8 +561,8 @@ def diff_runs(ticket_id: str):
     if not (_safe(a) and _safe(b)):
         abort(400)
 
-    pa = RUNS_DIR / ticket_id / a / "run_report.md"
-    pb = RUNS_DIR / ticket_id / b / "run_report.md"
+    pa = _under(RUNS_DIR, ticket_id, a, "run_report.md")
+    pb = _under(RUNS_DIR, ticket_id, b, "run_report.md")
     if not (pa.exists() and pb.exists()):
         return render_template("diff.html", ticket_id=ticket_id, runs=run_timestamps, diff="One or both run_report.md files not found.", a=a, b=b, mode="runs")
 
@@ -570,6 +599,22 @@ def _worker_is_alive(pid: Optional[int]) -> bool:
     if not pid:
         return False
     try:
+        if os.name == 'nt':
+            import ctypes
+            from ctypes import wintypes
+            kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+            kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel.OpenProcess.restype = wintypes.HANDLE
+            kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+            kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+            handle = kernel.OpenProcess(0x1000, False, int(pid))
+            if not handle:
+                return False
+            try:
+                code = wintypes.DWORD()
+                return bool(kernel.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259
+            finally:
+                kernel.CloseHandle(handle)
         os.kill(int(pid), 0)
         return True
     except (ProcessLookupError, PermissionError, OSError):
@@ -643,4 +688,4 @@ def worker_log_view():
 
 if __name__ == "__main__":
     # Run: python omniforge/viewer/app.py
-    app.run(host="127.0.0.1", port=5055, debug=True)
+    app.run(host="127.0.0.1", port=5055, debug=False)

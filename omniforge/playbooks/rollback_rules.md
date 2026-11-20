@@ -1,5 +1,8 @@
 # OmniForge Labs — Rollback Rules Playbook
 
+> Runtime scope: rollback chooses the next attempt's starting stage; it does not undo
+> source changes or side effects. Failure counts are cumulative, not consecutive.
+
 ## Principle
 
 When a gate fails, the runner **routes back** to the correct upstream stage rather than asking for a blind code fix.  This preserves traceability and prevents compounding errors.
